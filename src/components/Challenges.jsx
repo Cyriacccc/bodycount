@@ -102,16 +102,6 @@ function getSubmissionPoints(challenge, submission) {
   return basePoints + descriptionBonus + photoBonus;
 }
 
-function formatValidationDate(date) {
-  if (!date) return "Date inconnue";
-
-  return new Date(date).toLocaleDateString("fr-FR", {
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  });
-}
-
 export default function Challenges({ userId }) {
   const [activeFilter, setActiveFilter] = useState("TOUS");
 
@@ -128,17 +118,20 @@ export default function Challenges({ userId }) {
   const [checkingPublic, setCheckingPublic] = useState(null);
   const [checkingAllPublic, setCheckingAllPublic] = useState(false);
 
+  // Création de défi
   const [showForm, setShowForm] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [rewardPoints, setRewardPoints] = useState("60");
 
+  // Preuve de réalisation
   const [activeChallenge, setActiveChallenge] = useState(null);
   const [proofDescription, setProofDescription] = useState("");
   const [proofFile, setProofFile] = useState(null);
   const [proofPreview, setProofPreview] = useState("");
 
+  // Chargements et actions
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [loadingChallenges, setLoadingChallenges] = useState(true);
   const [loadingSubmissions, setLoadingSubmissions] = useState(false);
@@ -161,19 +154,21 @@ export default function Challenges({ userId }) {
 
     setLoadingPublicCompletions(true);
 
-    const { data, error } = await supabase
-      .from("public_challenge_completions")
-      .select("challenge_key, completed_at, points, group_id")
-      .eq("user_id", userId);
+    try {
+      const { data, error } = await supabase
+        .from("public_challenge_completions")
+        .select("challenge_key, completed_at, points, group_id")
+        .eq("user_id", userId);
 
-    if (error) {
-      console.error("Erreur chargement missions publiques :", error);
+      if (error) {
+        console.error("Erreur chargement missions publiques :", error);
+        return;
+      }
+
+      setPublicCompletions(data || []);
+    } finally {
       setLoadingPublicCompletions(false);
-      return;
     }
-
-    setPublicCompletions(data || []);
-    setLoadingPublicCompletions(false);
   }
 
   useEffect(() => {
@@ -216,7 +211,6 @@ export default function Challenges({ userId }) {
         return;
       }
 
-      // Actualiser les missions enregistrées dans Supabase
       await refreshPublicCompletions();
 
       if (silent) return;
@@ -277,7 +271,6 @@ export default function Challenges({ userId }) {
         }
       }
 
-      // Recharger après toutes les vérifications
       await refreshPublicCompletions();
 
       if (hasError) {
@@ -833,12 +826,10 @@ export default function Challenges({ userId }) {
 
   const allChallenges = [...initialChallenges, ...customChallenges];
 
-  // Missions publiques déjà validées par l'utilisateur
   const completedPublicKeys = new Set(
     publicCompletions.map((item) => item.challenge_key)
   );
 
-  // Défis collectifs validés par l'utilisateur
   const completedCustomIds = new Set(
     submissions
       .filter(
@@ -871,14 +862,6 @@ export default function Challenges({ userId }) {
     (total, challenge) => total + challenge.xp,
     0
   );
-
-  const approvedSubmissions = submissions
-    .filter((item) => item.status === "approved")
-    .sort(
-      (a, b) =>
-        new Date(b.reviewed_at || b.submitted_at) -
-        new Date(a.reviewed_at || a.submitted_at)
-    );
 
   const pendingSubmissions = submissions.filter(
     (item) => item.status === "pending" && item.user_id !== userId
@@ -1145,76 +1128,6 @@ export default function Challenges({ userId }) {
         )}
       </div>
 
-      {/* Historique des défis validés */}
-      <div className="challenges-section-heading">
-        <div>
-          <h2>HISTORIQUE DES DÉFIS</h2>
-          <p>Retrouve les défis accomplis par les membres du groupe.</p>
-        </div>
-
-        <span className="challenge-count">
-          {approvedSubmissions.length} VALIDÉS
-        </span>
-      </div>
-
-      <div className="challenge-submissions">
-        {approvedSubmissions.length === 0 ? (
-          <div className="challenges-loading">
-            <Trophy size={22} />
-            <p>Aucun défi validé pour le moment.</p>
-          </div>
-        ) : (
-          approvedSubmissions.map((submission) => {
-            const challenge = customChallenges.find(
-              (item) => item.id === submission.challenge_id
-            );
-
-            if (!challenge) return null;
-
-            return (
-              <div className="challenge-submission-card" key={submission.id}>
-                <div className="challenge-submission-info">
-                  <strong>{challenge.title}</strong>
-
-                  <span>
-                    Réalisé par{" "}
-                    <strong className="challenge-member-name">
-                      {memberNames[submission.user_id] || "Membre"}
-                    </strong>
-                  </span>
-
-                  <span>
-                    Validé le {formatValidationDate(submission.reviewed_at)}
-                  </span>
-
-                  {submission.proof_description && (
-                    <div className="challenge-proof-description">
-                      <FileText size={15} />
-                      <span>{submission.proof_description}</span>
-                    </div>
-                  )}
-
-                  {submission.photoUrl && (
-                    <img
-                      src={submission.photoUrl}
-                      alt="Preuve du défi"
-                      className="challenge-proof-image"
-                    />
-                  )}
-                </div>
-
-                <div className="challenge-reward">
-                  <Zap size={17} />
-                  <strong>
-                    +{getSubmissionPoints(challenge, submission)} XP
-                  </strong>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-
       {/* Missions publiques */}
       <div className="challenges-section-heading">
         <div>
@@ -1323,7 +1236,9 @@ export default function Challenges({ userId }) {
                     {isCustom &&
                       (challenge.createdBy === userId ||
                         ["admin", "owner", "creator"].includes(
-                          String(groupRoles[challenge.groupId] || "").toLowerCase()
+                          String(
+                            groupRoles[challenge.groupId] || ""
+                          ).toLowerCase()
                         )) && (
                         <button
                           type="button"
