@@ -261,6 +261,19 @@ button {
   flex-direction: column;
 }
 
+@media (max-width: 640px) {
+  .sidebar {
+    width: 58px;
+    padding: 15px 7px 12px;
+  }
+}
+
+@media (max-width: 380px) {
+  .sidebar {
+    width: 52px;
+  }
+}
+
 .sidebar .brand {
   margin-bottom: 55px;
 }
