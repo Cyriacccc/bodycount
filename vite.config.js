@@ -1,5 +1,4 @@
 
-
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
@@ -48,6 +47,7 @@ export default defineConfig({
       },
 
       workbox: {
+        importScripts: ["/push-sw.js"],
         navigateFallback: "/index.html",
         cleanupOutdatedCaches: true,
       },
@@ -58,3 +58,4 @@ export default defineConfig({
     }),
   ],
 });
+

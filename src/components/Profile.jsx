@@ -9,10 +9,31 @@ import {
   LogOut,
   ShieldCheck,
   LoaderCircle,
+  Bell,
+  BellOff,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 
 const avatars = ["🦊", "🐺", "🦁", "🐼", "🐸", "🐯", "🦅", "🐻"];
+
+const VAPID_PUBLIC_KEY =
+  "BLA5N_ip7yvYtCujFJU_4pKCUYU-evYKMeNMn9DZUq3Jlo4VW6AEC9RjjoBoGCM6zW3WOPXuGKUh-AjlXL-EZFI";
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding)
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; i++) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+
+  return outputArray;
+}
 
 export default function Profile({ user, onLogout }) {
   const [username, setUsername] = useState(
@@ -26,6 +47,41 @@ export default function Profile({ user, onLogout }) {
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  const [pushSupported, setPushSupported] = useState(null);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
+  const [pushMessage, setPushMessage] = useState("");
+  const [pushError, setPushError] = useState("");
+
+  async function savePushSubscription(subscription) {
+    const subscriptionData = subscription.toJSON();
+
+    if (!subscriptionData.keys?.p256dh || !subscriptionData.keys?.auth) {
+      throw new Error("Les clés de l'abonnement Push sont introuvables.");
+    }
+
+    const isIOS =
+      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+    const { error } = await supabase
+      .from("push_subscriptions")
+      .upsert(
+        {
+          user_id: user.id,
+          endpoint: subscription.endpoint,
+          p256dh: subscriptionData.keys.p256dh,
+          auth: subscriptionData.keys.auth,
+          platform: isIOS ? "ios" : "web",
+          user_agent: navigator.userAgent,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "endpoint" }
+      );
+
+    if (error) throw error;
+  }
 
   useEffect(() => {
     async function loadProfileData() {
@@ -56,6 +112,140 @@ export default function Profile({ user, onLogout }) {
 
     loadProfileData();
   }, [user.id]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function checkPushSupport() {
+      if (
+        !("serviceWorker" in navigator) ||
+        !("PushManager" in window) ||
+        typeof Notification === "undefined"
+      ) {
+        if (active) setPushSupported(false);
+        return;
+      }
+
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription =
+          await registration.pushManager.getSubscription();
+
+        if (!active) return;
+
+        setPushSupported(true);
+        setPushEnabled(Boolean(subscription));
+
+        if (subscription) {
+          await savePushSubscription(subscription);
+        }
+      } catch (err) {
+        console.error("Erreur vérification Push :", err);
+        if (active) {
+          setPushSupported(false);
+          setPushError("Impossible de vérifier les notifications sur cet appareil.");
+        }
+      }
+    }
+
+    checkPushSupport();
+
+    return () => {
+      active = false;
+    };
+  }, [user.id]);
+
+  async function enablePush() {
+    setPushLoading(true);
+    setPushError("");
+    setPushMessage("");
+
+    try {
+      const isIOS =
+        /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+      const isStandalone =
+        window.matchMedia("(display-mode: standalone)").matches ||
+        navigator.standalone === true;
+
+      if (isIOS && !isStandalone) {
+        throw new Error(
+          "Sur iPhone, ajoute d'abord BODYCOUNT à ton écran d'accueil, puis ouvre l'application depuis son icône."
+        );
+      }
+
+      if (Notification.permission === "denied") {
+        throw new Error(
+          "Les notifications sont bloquées dans les réglages de ton navigateur ou de ton iPhone."
+        );
+      }
+
+      let permission = Notification.permission;
+
+      if (permission === "default") {
+        permission = await Notification.requestPermission();
+      }
+
+      if (permission !== "granted") {
+        throw new Error("Tu n'as pas autorisé les notifications.");
+      }
+
+      const registration = await navigator.serviceWorker.ready;
+
+      let subscription =
+        await registration.pushManager.getSubscription();
+
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        });
+      }
+
+      await savePushSubscription(subscription);
+
+      setPushEnabled(true);
+      setPushMessage("Notifications activées sur cet appareil !");
+    } catch (err) {
+      console.error("Erreur activation Push :", err);
+      setPushError(err.message || "Impossible d'activer les notifications.");
+    } finally {
+      setPushLoading(false);
+    }
+  }
+
+  async function disablePush() {
+    setPushLoading(true);
+    setPushError("");
+    setPushMessage("");
+
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription =
+        await registration.pushManager.getSubscription();
+
+      if (subscription) {
+        const { error: deleteError } = await supabase
+          .from("push_subscriptions")
+          .delete()
+          .eq("user_id", user.id)
+          .eq("endpoint", subscription.endpoint);
+
+        if (deleteError) throw deleteError;
+
+        await subscription.unsubscribe();
+      }
+
+      setPushEnabled(false);
+      setPushMessage("Notifications désactivées sur cet appareil.");
+    } catch (err) {
+      console.error("Erreur désactivation Push :", err);
+      setPushError(err.message || "Impossible de désactiver les notifications.");
+    } finally {
+      setPushLoading(false);
+    }
+  }
 
   async function saveProfile(event) {
     event.preventDefault();
@@ -104,7 +294,6 @@ export default function Profile({ user, onLogout }) {
 
     setUsername(cleanUsername);
 
-    // Vérifie et enregistre le défi dans les groupes du joueur.
     const { error: challengeError } = await supabase.rpc(
       "complete_profile_challenge"
     );
@@ -216,6 +405,65 @@ export default function Profile({ user, onLogout }) {
         </div>
 
         <div className="profile-side">
+          <div className="profile-info-card">
+            <div className="profile-section-title">
+              <Bell size={17} />
+              <h3>NOTIFICATIONS PUSH</h3>
+            </div>
+
+            <p>
+              Reçois les notifications BODYCOUNT même lorsque l'application
+              est fermée.
+            </p>
+
+            {pushSupported === false && (
+              <div className="profile-message error">
+                Les notifications Push ne sont pas disponibles sur cet appareil.
+              </div>
+            )}
+
+            {pushSupported === null && (
+              <p>Vérification de la compatibilité...</p>
+            )}
+
+            {pushSupported && (
+              <>
+                <p>
+                  Statut : <strong>{pushEnabled ? "Activées" : "Désactivées"}</strong>
+                </p>
+
+                <button
+                  className="profile-save-button"
+                  type="button"
+                  onClick={pushEnabled ? disablePush : enablePush}
+                  disabled={pushLoading}
+                >
+                  {pushLoading ? (
+                    <LoaderCircle size={17} className="profile-spinner" />
+                  ) : pushEnabled ? (
+                    <BellOff size={17} />
+                  ) : (
+                    <Bell size={17} />
+                  )}
+
+                  {pushLoading
+                    ? "PATIENTE..."
+                    : pushEnabled
+                      ? "DÉSACTIVER LES NOTIFICATIONS"
+                      : "ACTIVER LES NOTIFICATIONS"}
+                </button>
+              </>
+            )}
+
+            {pushError && (
+              <div className="profile-message error">{pushError}</div>
+            )}
+
+            {pushMessage && (
+              <div className="profile-message success">{pushMessage}</div>
+            )}
+          </div>
+
           <div className="profile-info-card">
             <div className="profile-section-title">
               <ShieldCheck size={17} />
