@@ -1,6 +1,6 @@
 
 import { useEffect, useState, useCallback } from "react";
-
+import "./App.css";
 import Auth from "./components/Auth";
 import Groups from "./components/Groups";
 import Profile from "./components/Profile";
@@ -38,6 +38,7 @@ export default function App() {
 
   const userId = session?.user?.id;
 
+  // Récupération des notifications non lues
   const loadNotifications = useCallback(async () => {
     if (!userId || !supabase) return;
 
@@ -69,6 +70,7 @@ export default function App() {
     setNotificationCounts(counts);
   }, [userId]);
 
+  // Marquer les notifications comme lues
   const markNotificationsAsRead = useCallback(
     async (type) => {
       if (!userId || !supabase) return;
@@ -90,6 +92,7 @@ export default function App() {
     [userId, loadNotifications]
   );
 
+  // Navigation entre les pages
   function handleTabChange(newTab) {
     setTab(newTab);
 
@@ -106,6 +109,7 @@ export default function App() {
     }
   }
 
+  // Vérification de la session utilisateur
   useEffect(() => {
     if (!supabase) {
       setLoading(false);
@@ -134,6 +138,7 @@ export default function App() {
     };
   }, []);
 
+  // Écoute des notifications en temps réel
   useEffect(() => {
     if (!userId || !supabase) {
       setNotificationCounts({
@@ -167,6 +172,7 @@ export default function App() {
     };
   }, [userId, loadNotifications]);
 
+  // Déconnexion
   async function logout() {
     await supabase.auth.signOut();
 
@@ -177,6 +183,7 @@ export default function App() {
     });
   }
 
+  // Badge de notification
   function renderBadge(type) {
     const count = notificationCounts[type] || 0;
 
@@ -189,6 +196,7 @@ export default function App() {
     );
   }
 
+  // Écrans de chargement
   if (loading) {
     return (
       <div className="loading-screen">
@@ -212,148 +220,207 @@ export default function App() {
   const username =
     session.user.user_metadata?.username || "MEMBER";
 
+  // Navigation principale
+  const navigationItems = [
+    {
+      id: "ranking",
+      label: "Classement",
+      icon: Trophy,
+    },
+    {
+      id: "challenges",
+      label: "Challenges",
+      icon: Target,
+      badge: "challenge",
+    },
+    {
+      id: "achievements",
+      label: "Réussites",
+      icon: CheckCircle2,
+    },
+    {
+      id: "discussions",
+      label: "Discussions",
+      icon: MessageCircle,
+      badge: "discussion",
+    },
+    {
+      id: "experiences",
+      label: "Expériences",
+      icon: Heart,
+      badge: "experience",
+    },
+    {
+      id: "groups",
+      label: "Mes groupes",
+      icon: Users,
+    },
+    {
+      id: "profile",
+      label: "Mon profil",
+      icon: User,
+    },
+  ];
+
+  // Titres des pages
+  const pageTitles = {
+    ranking: "LEADERBOARD",
+    challenges: "CHALLENGES",
+    achievements: "RÉUSSITES",
+    discussions: "DISCUSSIONS",
+    experiences: "EXPÉRIENCES",
+    groups: "MES GROUPES",
+    profile: "MON PROFIL",
+  };
+
   return (
     <div className="dashboard">
+
+      {/* NAVIGATION LATÉRALE */}
       <aside className="sidebar">
+
+        {/* Logo */}
         <div className="brand">
           <div className="brand-icon">
             <Zap size={24} fill="currentColor" />
           </div>
-          <span>
+
+          <span className="brand-name">
             BODY<span className="green">COUNT</span>
           </span>
         </div>
 
-        <div className="sidebar-label">
-          MENU PRINCIPAL
-        </div>
+        {/* Menu principal */}
+        <nav className="sidebar-nav" aria-label="Navigation principale">
 
-        <button
-          className={tab === "ranking" ? "nav-item active" : "nav-item"}
-          onClick={() => handleTabChange("ranking")}
-        >
-          <Trophy size={19} />
-          Classement
-        </button>
+          <div className="sidebar-label">
+            MENU PRINCIPAL
+          </div>
 
-        <button
-          className={tab === "challenges" ? "nav-item active" : "nav-item"}
-          onClick={() => handleTabChange("challenges")}
-        >
-          <Target size={19} />
-          Challenges
-          {renderBadge("challenge")}
-        </button>
+          <div className="nav-items">
+            {navigationItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = tab === item.id;
 
-        <button
-          className={tab === "achievements" ? "nav-item active" : "nav-item"}
-          onClick={() => handleTabChange("achievements")}
-        >
-          <CheckCircle2 size={19} />
-          Réussites
-        </button>
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`nav-item ${isActive ? "active" : ""}`}
+                  onClick={() => handleTabChange(item.id)}
+                  aria-label={item.label}
+                  aria-current={isActive ? "page" : undefined}
+                  title={item.label}
+                >
+                  <span className="nav-icon">
+                    <Icon size={19} />
+                  </span>
 
-        <button
-          className={tab === "discussions" ? "nav-item active" : "nav-item"}
-          onClick={() => handleTabChange("discussions")}
-        >
-          <MessageCircle size={19} />
-          Discussions
-          {renderBadge("discussion")}
-        </button>
+                  <span className="nav-item-label">
+                    {item.label}
+                  </span>
 
-        <button
-          className={tab === "experiences" ? "nav-item active" : "nav-item"}
-          onClick={() => handleTabChange("experiences")}
-        >
-          <Heart size={19} />
-          Expériences
-          {renderBadge("experience")}
-        </button>
+                  {item.badge && renderBadge(item.badge)}
+                </button>
+              );
+            })}
+          </div>
+        </nav>
 
-        <button
-          className={tab === "groups" ? "nav-item active" : "nav-item"}
-          onClick={() => handleTabChange("groups")}
-        >
-          <Users size={19} />
-          Mes groupes
-        </button>
-
-        <button
-          className={tab === "profile" ? "nav-item active" : "nav-item"}
-          onClick={() => handleTabChange("profile")}
-        >
-          <User size={19} />
-          Mon profil
-        </button>
-
+        {/* Partie inférieure */}
         <div className="sidebar-bottom">
+
           <div className="privacy-note">
             <ShieldCheck size={19} />
-            <span>
+
+            <span className="privacy-text">
               Espace privé
               <br />
               Données protégées
             </span>
           </div>
 
-          <button className="logout-btn" onClick={logout}>
+          <button
+            type="button"
+            className="logout-btn"
+            onClick={logout}
+            title="Déconnexion"
+            aria-label="Déconnexion"
+          >
             <LogOut size={18} />
-            Déconnexion
+
+            <span className="logout-label">
+              Déconnexion
+            </span>
           </button>
+
         </div>
       </aside>
 
+      {/* CONTENU PRINCIPAL */}
       <main className="main-content">
+
+        {/* EN-TÊTE DE PAGE */}
         <header className="topbar">
-          <div>
-            <span className="eyebrow">PRIVATE CLUB</span>
+
+          <div className="page-heading">
+            <span className="eyebrow">
+              PRIVATE CLUB
+            </span>
+
             <h2>
-              {tab === "ranking" && "LEADERBOARD"}
-              {tab === "challenges" && "CHALLENGES"}
-              {tab === "achievements" && "RÉUSSITES"}
-              {tab === "discussions" && "DISCUSSIONS"}
-              {tab === "experiences" && "EXPÉRIENCES"}
-              {tab === "groups" && "MES GROUPES"}
-              {tab === "profile" && "MON PROFIL"}
+              {pageTitles[tab]}
             </h2>
           </div>
 
           <div className="user-chip">
+
             <div className="avatar">
               {username.charAt(0).toUpperCase()}
             </div>
-            <span>{username}</span>
+
+            <span>
+              {username}
+            </span>
+
           </div>
         </header>
 
-        {tab === "ranking" && (
-          <Ranking userId={session.user.id} />
-        )}
+        {/* PAGES */}
+        <div className="page-content">
 
-        {tab === "challenges" && (
-          <Challenges userId={session.user.id} />
-        )}
+          {tab === "ranking" && (
+            <Ranking userId={session.user.id} />
+          )}
 
-        {tab === "achievements" && (
-          <Achievements userId={session.user.id} />
-        )}
+          {tab === "challenges" && (
+            <Challenges userId={session.user.id} />
+          )}
 
-        {tab === "discussions" && (
-          <Discussions userId={session.user.id} />
-        )}
+          {tab === "achievements" && (
+            <Achievements userId={session.user.id} />
+          )}
 
-        {tab === "experiences" && (
-          <Experiences userId={session.user.id} />
-        )}
+          {tab === "discussions" && (
+            <Discussions userId={session.user.id} />
+          )}
 
-        {tab === "groups" && (
-          <Groups userId={session.user.id} />
-        )}
+          {tab === "experiences" && (
+            <Experiences userId={session.user.id} />
+          )}
 
-        {tab === "profile" && (
-          <Profile user={session.user} onLogout={logout} />
-        )}
+          {tab === "groups" && (
+            <Groups userId={session.user.id} />
+          )}
+
+          {tab === "profile" && (
+            <Profile
+              user={session.user}
+              onLogout={logout}
+            />
+          )}
+
+        </div>
       </main>
     </div>
   );
