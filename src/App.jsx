@@ -6,6 +6,7 @@ import Groups from "./components/Groups";
 import Profile from "./components/Profile";
 import Ranking from "./components/Ranking";
 import Challenges from "./components/Challenges";
+import Achievements from "./components/Achievements";
 import Discussions from "./components/Discussions";
 import Experiences from "./components/Experiences";
 
@@ -21,6 +22,7 @@ import {
   Target,
   MessageCircle,
   Heart,
+  CheckCircle2,
 } from "lucide-react";
 
 export default function App() {
@@ -36,7 +38,6 @@ export default function App() {
 
   const userId = session?.user?.id;
 
-  // Charger les notifications non lues
   const loadNotifications = useCallback(async () => {
     if (!userId || !supabase) return;
 
@@ -68,7 +69,6 @@ export default function App() {
     setNotificationCounts(counts);
   }, [userId]);
 
-  // Marquer les notifications d'une catégorie comme lues
   const markNotificationsAsRead = useCallback(
     async (type) => {
       if (!userId || !supabase) return;
@@ -90,7 +90,6 @@ export default function App() {
     [userId, loadNotifications]
   );
 
-  // Changer d'onglet et marquer les notifications correspondantes comme lues
   function handleTabChange(newTab) {
     setTab(newTab);
 
@@ -107,7 +106,6 @@ export default function App() {
     }
   }
 
-  // Session utilisateur
   useEffect(() => {
     if (!supabase) {
       setLoading(false);
@@ -136,7 +134,6 @@ export default function App() {
     };
   }, []);
 
-  // Charger les notifications et écouter les nouvelles
   useEffect(() => {
     if (!userId || !supabase) {
       setNotificationCounts({
@@ -249,6 +246,14 @@ export default function App() {
         </button>
 
         <button
+          className={tab === "achievements" ? "nav-item active" : "nav-item"}
+          onClick={() => handleTabChange("achievements")}
+        >
+          <CheckCircle2 size={19} />
+          Réussites
+        </button>
+
+        <button
           className={tab === "discussions" ? "nav-item active" : "nav-item"}
           onClick={() => handleTabChange("discussions")}
         >
@@ -306,6 +311,7 @@ export default function App() {
             <h2>
               {tab === "ranking" && "LEADERBOARD"}
               {tab === "challenges" && "CHALLENGES"}
+              {tab === "achievements" && "RÉUSSITES"}
               {tab === "discussions" && "DISCUSSIONS"}
               {tab === "experiences" && "EXPÉRIENCES"}
               {tab === "groups" && "MES GROUPES"}
@@ -327,6 +333,10 @@ export default function App() {
 
         {tab === "challenges" && (
           <Challenges userId={session.user.id} />
+        )}
+
+        {tab === "achievements" && (
+          <Achievements userId={session.user.id} />
         )}
 
         {tab === "discussions" && (

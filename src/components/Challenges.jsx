@@ -1,6 +1,4 @@
 
-
-
 import { useEffect, useState } from "react";
 import {
   Trophy,
@@ -76,7 +74,8 @@ const initialChallenges = [
     id: 5,
     challengeKey: "stay_active",
     title: "Reste actif",
-    description: "Participe à la vie de ton groupe pendant au moins trois jours distincts.",
+    description:
+      "Participe à la vie de ton groupe pendant au moins trois jours distincts.",
     xp: 100,
     category: "Régularité",
     icon: Flame,
@@ -124,6 +123,8 @@ export default function Challenges({ userId }) {
 
   // Missions publiques
   const [publicCompletions, setPublicCompletions] = useState([]);
+  const [loadingPublicCompletions, setLoadingPublicCompletions] =
+    useState(true);
   const [checkingPublic, setCheckingPublic] = useState(null);
   const [checkingAllPublic, setCheckingAllPublic] = useState(false);
 
@@ -151,12 +152,14 @@ export default function Challenges({ userId }) {
   // MISSIONS PUBLIQUES
   // =====================================================
 
-  // Récupérer les missions déjà validées
   async function refreshPublicCompletions() {
     if (!userId) {
       setPublicCompletions([]);
+      setLoadingPublicCompletions(false);
       return;
     }
+
+    setLoadingPublicCompletions(true);
 
     const { data, error } = await supabase
       .from("public_challenge_completions")
@@ -165,10 +168,12 @@ export default function Challenges({ userId }) {
 
     if (error) {
       console.error("Erreur chargement missions publiques :", error);
+      setLoadingPublicCompletions(false);
       return;
     }
 
     setPublicCompletions(data || []);
+    setLoadingPublicCompletions(false);
   }
 
   useEffect(() => {
@@ -176,7 +181,6 @@ export default function Challenges({ userId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  // Vérifier une mission auprès de Supabase
   async function checkPublicChallenge(
     challengeKey,
     groupId = selectedGroup,
@@ -212,6 +216,7 @@ export default function Challenges({ userId }) {
         return;
       }
 
+      // Actualiser les missions enregistrées dans Supabase
       await refreshPublicCompletions();
 
       if (silent) return;
@@ -246,7 +251,6 @@ export default function Challenges({ userId }) {
     }
   }
 
-  // Vérifier automatiquement les six missions
   async function checkAllPublicChallenges(groupId = selectedGroup) {
     if (!userId || !groupId || checkingAllPublic) return;
 
@@ -273,6 +277,7 @@ export default function Challenges({ userId }) {
         }
       }
 
+      // Recharger après toutes les vérifications
       await refreshPublicCompletions();
 
       if (hasError) {
@@ -288,7 +293,6 @@ export default function Challenges({ userId }) {
     }
   }
 
-  // Vérification automatique au chargement et au changement de groupe
   useEffect(() => {
     if (!loadingGroups && selectedGroup && userId) {
       checkAllPublicChallenges(selectedGroup);
@@ -447,6 +451,7 @@ export default function Challenges({ userId }) {
     if (!userId || customChallenges.length === 0) {
       setSubmissions([]);
       setMemberNames({});
+      setLoadingSubmissions(false);
       return;
     }
 
@@ -596,7 +601,6 @@ export default function Challenges({ userId }) {
     setRewardPoints("60");
     setShowForm(false);
 
-    // La création d'un défi peut valider la mission publique correspondante.
     await checkPublicChallenge("create_group_challenge", selectedGroup, true);
 
     setMessage("Défi créé avec succès !");
@@ -829,14 +833,41 @@ export default function Challenges({ userId }) {
 
   const allChallenges = [...initialChallenges, ...customChallenges];
 
+  // Missions publiques déjà validées par l'utilisateur
+  const completedPublicKeys = new Set(
+    publicCompletions.map((item) => item.challenge_key)
+  );
+
+  // Défis collectifs validés par l'utilisateur
+  const completedCustomIds = new Set(
+    submissions
+      .filter(
+        (item) =>
+          item.user_id === userId &&
+          item.status === "approved"
+      )
+      .map((item) => item.challenge_id)
+  );
+
+  // Retirer les missions déjà terminées
+  const availableChallenges = allChallenges.filter((challenge) => {
+    if (challenge.challengeKey) {
+      return !completedPublicKeys.has(challenge.challengeKey);
+    }
+
+    return !completedCustomIds.has(challenge.id);
+  });
+
+  // Filtrage par catégorie
   const filteredChallenges =
     activeFilter === "TOUS"
-      ? allChallenges
-      : allChallenges.filter(
-          (challenge) => challenge.category.toUpperCase() === activeFilter
+      ? availableChallenges
+      : availableChallenges.filter(
+          (challenge) =>
+            challenge.category.toUpperCase() === activeFilter
         );
 
-  const totalXP = allChallenges.reduce(
+  const totalXP = availableChallenges.reduce(
     (total, challenge) => total + challenge.xp,
     0
   );
@@ -893,7 +924,7 @@ export default function Challenges({ userId }) {
             <Target size={20} />
           </div>
           <div>
-            <strong>{allChallenges.length}</strong>
+            <strong>{availableChallenges.length}</strong>
             <span>DÉFIS DISPONIBLES</span>
           </div>
         </div>
@@ -1214,7 +1245,7 @@ export default function Challenges({ userId }) {
         </button>
       </div>
 
-      {/* Liste de tous les défis */}
+      {/* Liste des défis encore disponibles */}
       <div className="challenges-section-heading">
         <div>
           <h2>TOUS LES DÉFIS</h2>
@@ -1222,7 +1253,9 @@ export default function Challenges({ userId }) {
         </div>
 
         <span className="challenge-count">
-          {filteredChallenges.length} MISSIONS
+          {loadingPublicCompletions || checkingAllPublic
+            ? "CHARGEMENT..."
+            : `${filteredChallenges.length} MISSIONS`}
         </span>
       </div>
 
@@ -1239,7 +1272,10 @@ export default function Challenges({ userId }) {
       </div>
 
       <div className="challenges-grid">
-        {loadingChallenges ? (
+        {loadingChallenges ||
+        loadingSubmissions ||
+        loadingPublicCompletions ||
+        checkingAllPublic ? (
           <div className="challenges-loading">
             <LoaderCircle size={22} />
             <p>Chargement des défis...</p>
@@ -1247,7 +1283,10 @@ export default function Challenges({ userId }) {
         ) : filteredChallenges.length === 0 ? (
           <div className="challenges-loading">
             <Target size={25} />
-            <p>Aucun défi dans cette catégorie pour le moment.</p>
+            <p>
+              Aucun défi disponible dans cette catégorie. Bravo, tu as tout
+              accompli !
+            </p>
           </div>
         ) : (
           filteredChallenges.map((challenge) => {
@@ -1267,12 +1306,6 @@ export default function Challenges({ userId }) {
                 item.user_id !== userId
             );
 
-            const publicCompletion = !isCustom
-              ? publicCompletions.find(
-                  (item) => item.challenge_key === challenge.challengeKey
-                )
-              : null;
-
             return (
               <div className="challenge-card" key={challenge.id}>
                 <div className="challenge-card-top">
@@ -1290,9 +1323,7 @@ export default function Challenges({ userId }) {
                     {isCustom &&
                       (challenge.createdBy === userId ||
                         ["admin", "owner", "creator"].includes(
-                          String(
-                            groupRoles[challenge.groupId] || ""
-                          ).toLowerCase()
+                          String(groupRoles[challenge.groupId] || "").toLowerCase()
                         )) && (
                         <button
                           type="button"
@@ -1328,39 +1359,27 @@ export default function Challenges({ userId }) {
                   </div>
 
                   {!isCustom ? (
-                    publicCompletion ? (
-                      <span className="challenge-status-approved">
+                    <button
+                      type="button"
+                      className="challenge-request-button"
+                      disabled={
+                        !selectedGroup ||
+                        checkingAllPublic ||
+                        checkingPublic === challenge.challengeKey
+                      }
+                      onClick={() =>
+                        checkPublicChallenge(challenge.challengeKey)
+                      }
+                    >
+                      {checkingPublic === challenge.challengeKey ? (
+                        <LoaderCircle size={15} />
+                      ) : !selectedGroup ? (
+                        <Lock size={15} />
+                      ) : (
                         <CheckCircle2 size={15} />
-                        VALIDÉ
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="challenge-request-button"
-                        disabled={
-                          !selectedGroup ||
-                          checkingAllPublic ||
-                          checkingPublic === challenge.challengeKey
-                        }
-                        onClick={() =>
-                          checkPublicChallenge(challenge.challengeKey)
-                        }
-                      >
-                        {checkingPublic === challenge.challengeKey ? (
-                          <LoaderCircle size={15} />
-                        ) : !selectedGroup ? (
-                          <Lock size={15} />
-                        ) : (
-                          <CheckCircle2 size={15} />
-                        )}
-                        {!selectedGroup ? "REJOINS UN GROUPE" : "VÉRIFIER"}
-                      </button>
-                    )
-                  ) : mySubmission?.status === "approved" ? (
-                    <span className="challenge-status-approved">
-                      <CheckCircle2 size={15} />
-                      VALIDÉ
-                    </span>
+                      )}
+                      {!selectedGroup ? "REJOINS UN GROUPE" : "VÉRIFIER"}
+                    </button>
                   ) : mySubmission?.status === "pending" ? (
                     <span className="challenge-status-pending">
                       <Clock size={15} />
