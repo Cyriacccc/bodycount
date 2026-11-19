@@ -59,7 +59,7 @@ export default function Experiences({ userId }) {
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState("");
 
-  const [consentAccepted, setConsentAccepted] = useState(false);
+  const [isGroupAdmin, setIsGroupAdmin] = useState(false);
   const [adultConfirmed, setAdultConfirmed] = useState(false);
   const [charterAccepted, setCharterAccepted] = useState(false);
 
@@ -118,6 +118,7 @@ export default function Experiences({ userId }) {
       setError("Impossible de charger les groupes.");
     } else {
       setGroups(data || []);
+
       if (data?.length > 0) {
         setSelectedGroup(data[0].id);
       }
@@ -160,7 +161,7 @@ export default function Experiences({ userId }) {
     const { data: membership, error: membershipError } = await supabase
       .from("group_members")
       .select(
-        "experiences_adult_confirmed_at, experiences_charter_accepted_at"
+        "role, experiences_adult_confirmed_at, experiences_charter_accepted_at"
       )
       .eq("group_id", selectedGroup)
       .eq("user_id", userId)
@@ -172,11 +173,14 @@ export default function Experiences({ userId }) {
       return;
     }
 
-    setConsentAccepted(
-      Boolean(
-        membership?.experiences_adult_confirmed_at &&
-        membership?.experiences_charter_accepted_at
-      )
+    setIsGroupAdmin(membership?.role === "admin");
+
+    setAdultConfirmed(
+      Boolean(membership?.experiences_adult_confirmed_at)
+    );
+
+    setCharterAccepted(
+      Boolean(membership?.experiences_charter_accepted_at)
     );
 
     await loadGroupExperiences();
@@ -200,7 +204,6 @@ export default function Experiences({ userId }) {
 
     const items = data || [];
 
-    // Génération des URL temporaires pour les photos privées.
     const experiencesWithPhotos = await Promise.all(
       items.map(async (item) => {
         if (!item.photo_path) {
@@ -326,13 +329,13 @@ export default function Experiences({ userId }) {
     setError("");
     setSuccess("");
 
-    if (!adultConfirmed && !consentAccepted) {
+    if (!adultConfirmed) {
       setError("Tu dois confirmer ta majorité.");
       return;
     }
 
-    if (!charterAccepted && !consentAccepted) {
-      setError("Tu dois accepter la charte.");
+    if (!charterAccepted) {
+      setError("Tu dois accepter la charte pour publier.");
       return;
     }
 
@@ -346,21 +349,17 @@ export default function Experiences({ userId }) {
     let uploadedPhotoPath = null;
 
     try {
-      if (!consentAccepted) {
-        const { error: consentError } = await supabase.rpc(
-          "accept_experience_charter",
-          {
-            p_group_id: selectedGroup,
-            p_is_18_plus: true,
-          }
-        );
+      // Enregistrer les confirmations de majorité et de charte.
+      const { error: consentError } = await supabase.rpc(
+        "accept_experience_charter",
+        {
+          p_group_id: selectedGroup,
+          p_is_18_plus: true,
+        }
+      );
 
-        if (consentError) throw consentError;
+      if (consentError) throw consentError;
 
-        setConsentAccepted(true);
-      }
-
-      // Envoyer la photo si l'utilisateur en a sélectionné une.
       if (photoFile) {
         uploadedPhotoPath = await uploadPhoto();
       }
@@ -380,9 +379,6 @@ export default function Experiences({ userId }) {
       setDescription("");
       setCategory("category_1");
       removePhoto();
-
-      setAdultConfirmed(false);
-      setCharterAccepted(false);
       setShowForm(false);
 
       setSuccess("Ton expérience a été publiée.");
@@ -391,14 +387,16 @@ export default function Experiences({ userId }) {
     } catch (err) {
       console.error(err);
 
-      // Nettoyer la photo si la publication a échoué.
       if (uploadedPhotoPath) {
         const { error: removeError } = await supabase.storage
           .from("group-experience-photos")
           .remove([uploadedPhotoPath]);
 
         if (removeError) {
-          console.error("Erreur suppression photo temporaire :", removeError);
+          console.error(
+            "Erreur suppression photo temporaire :",
+            removeError
+          );
         }
       }
 
@@ -466,15 +464,13 @@ export default function Experiences({ userId }) {
     const { error } = await supabase
       .from("group_experiences")
       .delete()
-      .eq("id", experienceId)
-      .eq("user_id", userId);
+      .eq("id", experienceId);
 
     if (error) {
       setError("Impossible de supprimer cette publication.");
       return;
     }
 
-    // Supprimer également la photo associée.
     if (experience.photo_path) {
       const { error: photoError } = await supabase.storage
         .from("group-experience-photos")
@@ -605,7 +601,7 @@ export default function Experiences({ userId }) {
           <strong>Un espace réservé aux adultes du groupe</strong>
           <p>
             Les publications sont visibles uniquement par les membres
-            autorisés du groupe. Le partage reste entièrement volontaire.
+            majeurs ayant confirmé leur âge. Le partage reste entièrement volontaire.
           </p>
         </div>
       </div>
@@ -639,33 +635,37 @@ export default function Experiences({ userId }) {
             <h2>Partager une expérience</h2>
           </div>
 
-          {!consentAccepted && (
+          {(!adultConfirmed || !charterAccepted) && (
             <div className="experience-consent">
               <h3>Avant de publier</h3>
 
-              <label>
-                <input
-                  type="checkbox"
-                  checked={adultConfirmed}
-                  onChange={(event) =>
-                    setAdultConfirmed(event.target.checked)
-                  }
-                />
-                Je confirme avoir 18 ans ou plus.
-              </label>
+              {!adultConfirmed && (
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={adultConfirmed}
+                    onChange={(event) =>
+                      setAdultConfirmed(event.target.checked)
+                    }
+                  />
+                  Je confirme avoir 18 ans ou plus.
+                </label>
+              )}
 
-              <label>
-                <input
-                  type="checkbox"
-                  checked={charterAccepted}
-                  onChange={(event) =>
-                    setCharterAccepted(event.target.checked)
-                  }
-                />
-                J'accepte la charte : je partage uniquement mes propres
-                expériences, sans révéler l'identité d'une autre personne
-                ni publier de contenu intime ou de photo intime.
-              </label>
+              {!charterAccepted && (
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={charterAccepted}
+                    onChange={(event) =>
+                      setCharterAccepted(event.target.checked)
+                    }
+                  />
+                  J'accepte la charte : je partage uniquement mes propres
+                  expériences, sans révéler l'identité d'une autre personne
+                  ni publier de contenu intime ou de photo intime.
+                </label>
+              )}
             </div>
           )}
 
@@ -854,11 +854,15 @@ export default function Experiences({ userId }) {
                   </div>
 
                   <div className="experience-actions">
-                    {mine ? (
+                    {mine || isGroupAdmin ? (
                       <button
                         type="button"
                         onClick={() => deleteExperience(experience.id)}
-                        title="Supprimer"
+                        title={
+                          mine
+                            ? "Supprimer ma publication"
+                            : "Supprimer cette publication (administrateur)"
+                        }
                       >
                         <Trash2 size={17} />
                       </button>
