@@ -414,60 +414,7 @@ button {
   font-weight: 900;
 }
 
-@media (max-width: 750px) {
-  .dashboard {
-    flex-direction: column;
-  }
 
-  .sidebar {
-    width: 100%;
-    padding: 15px;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .sidebar .brand {
-    margin-bottom: 18px;
-  }
-
-  .sidebar-label,
-  .sidebar-bottom {
-    display: none;
-  }
-
-  .sidebar {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 5px;
-  }
-
-  .sidebar .brand {
-    grid-column: 1 / -1;
-  }
-
-  .nav-item {
-    justify-content: center;
-    padding: 12px 5px;
-    font-size: 10px;
-    gap: 6px;
-  }
-
-  .main-content {
-    padding: 25px 18px;
-  }
-
-  .stats-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .auth-card {
-    padding: 25px 20px;
-  }
-
-  .auth-heading h1 {
-    font-size: 40px;
-  }
-}
 
 /* =====================================
    BODYCOUNT - GROUPS
@@ -4662,4 +4609,130 @@ button {
   color: #111;
   font-size: 11px;
   font-weight: 800;
+}
+
+/* =====================================================
+   ONGLETS DES CHALLENGES
+===================================================== */
+
+.challenge-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 30px 0;
+}
+
+.challenge-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 14px 18px;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.12));
+  border-radius: 12px;
+  background: var(--card-bg, rgba(255,255,255,0.03));
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.challenge-tab:hover {
+  border-color: var(--accent-color, #a3e635);
+  transform: translateY(-2px);
+}
+
+.challenge-tab.active {
+  border-color: var(--accent-color, #a3e635);
+  background: rgba(163, 230, 53, 0.09);
+  color: var(--accent-color, #a3e635);
+}
+
+.challenge-tab small {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 23px;
+  height: 23px;
+  padding: 0 6px;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.08);
+  color: inherit;
+  font-size: 11px;
+}
+
+.challenge-tab-content {
+  animation: challengeTabAppear 0.25s ease;
+}
+
+@keyframes challengeTabAppear {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Sélecteur de groupe */
+
+.challenge-group-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 20px 0 28px;
+  padding: 18px;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  border-radius: 12px;
+  background: var(--card-bg, rgba(255,255,255,0.03));
+}
+
+.challenge-group-selector label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.challenge-group-selector select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.15));
+  border-radius: 8px;
+  background: var(--input-bg, #171717);
+  color: inherit;
+  font: inherit;
+}
+
+.challenge-group-selector p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  opacity: 0.7;
+}
+
+/* Badge public */
+
+.challenge-difficulty.public {
+  color: var(--accent-color, #a3e635);
+  border-color: rgba(163, 230, 53, 0.3);
+  background: rgba(163, 230, 53, 0.08);
+}
+
+@media (max-width: 600px) {
+  .challenge-tabs {
+    gap: 8px;
+  }
+
+  .challenge-tab {
+    gap: 6px;
+    padding: 12px 8px;
+    font-size: 11px;
+  }
 }
