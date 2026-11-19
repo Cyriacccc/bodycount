@@ -1,5 +1,6 @@
 
 
+
 import { useEffect, useState } from "react";
 import {
   Trophy,
@@ -33,6 +34,7 @@ const filters = ["TOUS", "PROFIL", "SOCIAL", "GROUPE", "RÉGULARITÉ"];
 const initialChallenges = [
   {
     id: 1,
+    challengeKey: "complete_profile",
     title: "Complète ton profil",
     description: "Choisis ton pseudonyme et personnalise ton avatar.",
     xp: 50,
@@ -42,6 +44,7 @@ const initialChallenges = [
   },
   {
     id: 2,
+    challengeKey: "join_group",
     title: "Rejoins un groupe",
     description: "Intègre un groupe et commence à participer.",
     xp: 25,
@@ -51,6 +54,7 @@ const initialChallenges = [
   },
   {
     id: 3,
+    challengeKey: "start_discussion",
     title: "Lance une discussion",
     description: "Propose un sujet de discussion aux membres de ton groupe.",
     xp: 30,
@@ -60,6 +64,7 @@ const initialChallenges = [
   },
   {
     id: 4,
+    challengeKey: "create_group_challenge",
     title: "Organise un défi collectif",
     description: "Propose une activité à réaliser avec les membres de ton groupe.",
     xp: 75,
@@ -69,8 +74,9 @@ const initialChallenges = [
   },
   {
     id: 5,
+    challengeKey: "stay_active",
     title: "Reste actif",
-    description: "Participe à la vie de ton groupe plusieurs jours de suite.",
+    description: "Participe à la vie de ton groupe pendant au moins trois jours distincts.",
     xp: 100,
     category: "Régularité",
     icon: Flame,
@@ -78,8 +84,9 @@ const initialChallenges = [
   },
   {
     id: 6,
+    challengeKey: "evolve_profile",
     title: "Fais évoluer ton profil",
-    description: "Personnalise ton profil pour te démarquer.",
+    description: "Personnalise à nouveau ton profil après l'avoir complété.",
     xp: 40,
     category: "Profil",
     icon: Star,
@@ -115,6 +122,11 @@ export default function Challenges({ userId }) {
   const [memberNames, setMemberNames] = useState({});
   const [groupRoles, setGroupRoles] = useState({});
 
+  // Missions publiques
+  const [publicCompletions, setPublicCompletions] = useState([]);
+  const [checkingPublic, setCheckingPublic] = useState(null);
+  const [checkingAllPublic, setCheckingAllPublic] = useState(false);
+
   const [showForm, setShowForm] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState("");
   const [title, setTitle] = useState("");
@@ -135,11 +147,164 @@ export default function Challenges({ userId }) {
   const [deletingChallenge, setDeletingChallenge] = useState(null);
   const [message, setMessage] = useState("");
 
-  // Charger tous les groupes dont l'utilisateur est membre
+  // =====================================================
+  // MISSIONS PUBLIQUES
+  // =====================================================
+
+  // Récupérer les missions déjà validées
+  async function refreshPublicCompletions() {
+    if (!userId) {
+      setPublicCompletions([]);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("public_challenge_completions")
+      .select("challenge_key, completed_at, points, group_id")
+      .eq("user_id", userId);
+
+    if (error) {
+      console.error("Erreur chargement missions publiques :", error);
+      return;
+    }
+
+    setPublicCompletions(data || []);
+  }
+
+  useEffect(() => {
+    refreshPublicCompletions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  // Vérifier une mission auprès de Supabase
+  async function checkPublicChallenge(
+    challengeKey,
+    groupId = selectedGroup,
+    silent = false
+  ) {
+    if (!userId || !groupId) {
+      if (!silent) {
+        setMessage("Tu dois rejoindre un groupe pour vérifier cette mission.");
+      }
+      return;
+    }
+
+    setCheckingPublic(challengeKey);
+
+    try {
+      const { data, error } = await supabase.rpc(
+        "complete_public_challenge",
+        {
+          p_challenge_key: challengeKey,
+          p_group_id: groupId,
+        }
+      );
+
+      if (error) {
+        console.error("Erreur vérification mission :", error);
+
+        if (!silent) {
+          setMessage(
+            "Impossible de vérifier la mission : " + error.message
+          );
+        }
+
+        return;
+      }
+
+      await refreshPublicCompletions();
+
+      if (silent) return;
+
+      if (data?.status === "completed") {
+        if (Number(data.points_awarded) > 0) {
+          setMessage(
+            `Mission validée ! Tu remportes ${data.points_awarded} XP.`
+          );
+        } else {
+          setMessage(
+            "Mission validée ! La récompense avait déjà été attribuée."
+          );
+        }
+      } else if (data?.status === "already_completed") {
+        setMessage("Cette mission a déjà été validée.");
+      } else if (data?.status === "not_eligible") {
+        setMessage(
+          "Mission non validée pour le moment. Continue tes activités et réessaie."
+        );
+      } else {
+        setMessage("La vérification de la mission est terminée.");
+      }
+    } catch (error) {
+      console.error("Erreur inattendue :", error);
+
+      if (!silent) {
+        setMessage("Une erreur est survenue pendant la vérification.");
+      }
+    } finally {
+      setCheckingPublic(null);
+    }
+  }
+
+  // Vérifier automatiquement les six missions
+  async function checkAllPublicChallenges(groupId = selectedGroup) {
+    if (!userId || !groupId || checkingAllPublic) return;
+
+    setCheckingAllPublic(true);
+
+    let hasError = false;
+
+    try {
+      for (const challenge of initialChallenges) {
+        const { error } = await supabase.rpc(
+          "complete_public_challenge",
+          {
+            p_challenge_key: challenge.challengeKey,
+            p_group_id: groupId,
+          }
+        );
+
+        if (error) {
+          console.error(
+            `Erreur mission ${challenge.challengeKey} :`,
+            error
+          );
+          hasError = true;
+        }
+      }
+
+      await refreshPublicCompletions();
+
+      if (hasError) {
+        setMessage(
+          "Certaines missions n'ont pas pu être vérifiées. Réessaie."
+        );
+      }
+    } catch (error) {
+      console.error("Erreur vérification globale :", error);
+      setMessage("Impossible de vérifier toutes les missions.");
+    } finally {
+      setCheckingAllPublic(false);
+    }
+  }
+
+  // Vérification automatique au chargement et au changement de groupe
+  useEffect(() => {
+    if (!loadingGroups && selectedGroup && userId) {
+      checkAllPublicChallenges(selectedGroup);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingGroups, selectedGroup, userId]);
+
+  // =====================================================
+  // CHARGEMENT DES GROUPES
+  // =====================================================
+
   useEffect(() => {
     async function loadGroups() {
       if (!userId) {
         setGroups([]);
+        setSelectedGroup("");
         setLoadingGroups(false);
         return;
       }
@@ -160,9 +325,11 @@ export default function Challenges({ userId }) {
       }
 
       const roles = {};
+
       (memberships || []).forEach((membership) => {
         roles[membership.group_id] = membership.role;
       });
+
       setGroupRoles(roles);
 
       const groupIds = [
@@ -193,6 +360,8 @@ export default function Challenges({ userId }) {
               ? previous
               : loadedGroups[0].id
           );
+        } else {
+          setSelectedGroup("");
         }
       }
 
@@ -202,7 +371,10 @@ export default function Challenges({ userId }) {
     loadGroups();
   }, [userId]);
 
-  // Charger les défis personnalisés de tous les groupes
+  // =====================================================
+  // CHARGEMENT DES DÉFIS PERSONNALISÉS
+  // =====================================================
+
   useEffect(() => {
     async function loadCustomChallenges() {
       if (!userId) {
@@ -267,7 +439,10 @@ export default function Challenges({ userId }) {
     loadCustomChallenges();
   }, [userId]);
 
-  // Charger les demandes de validation et leurs photos
+  // =====================================================
+  // CHARGEMENT DES DEMANDES DE VALIDATION
+  // =====================================================
+
   async function loadSubmissions() {
     if (!userId || customChallenges.length === 0) {
       setSubmissions([]);
@@ -349,7 +524,10 @@ export default function Challenges({ userId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, customChallenges]);
 
-  // Créer un défi classique
+  // =====================================================
+  // CRÉATION D'UN DÉFI PERSONNALISÉ
+  // =====================================================
+
   async function createChallenge(e) {
     e.preventDefault();
     setMessage("");
@@ -417,10 +595,17 @@ export default function Challenges({ userId }) {
     setDescription("");
     setRewardPoints("60");
     setShowForm(false);
+
+    // La création d'un défi peut valider la mission publique correspondante.
+    await checkPublicChallenge("create_group_challenge", selectedGroup, true);
+
     setMessage("Défi créé avec succès !");
   }
 
-  // Supprimer un défi personnalisé
+  // =====================================================
+  // SUPPRESSION D'UN DÉFI PERSONNALISÉ
+  // =====================================================
+
   async function deleteChallenge(challenge) {
     const confirmed = window.confirm(
       `Supprimer définitivement le défi « ${challenge.title} » ? Cette action est irréversible.`
@@ -449,6 +634,7 @@ export default function Challenges({ userId }) {
     setCustomChallenges((previous) =>
       previous.filter((item) => item.id !== challenge.id)
     );
+
     setSubmissions((previous) =>
       previous.filter((item) => item.challenge_id !== challenge.id)
     );
@@ -461,7 +647,10 @@ export default function Challenges({ userId }) {
     setDeletingChallenge(null);
   }
 
-  // Ouvrir le formulaire de preuve
+  // =====================================================
+  // FORMULAIRE DE PREUVE
+  // =====================================================
+
   function openProofForm(challenge) {
     setActiveChallenge(challenge);
     setProofDescription("");
@@ -483,7 +672,6 @@ export default function Challenges({ userId }) {
     setProofPreview("");
   }
 
-  // Sélectionner une photo de preuve
   function handleProofFile(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -509,7 +697,10 @@ export default function Challenges({ userId }) {
     setMessage("");
   }
 
-  // Envoyer une demande avec sa preuve facultative
+  // =====================================================
+  // ENVOI D'UNE DEMANDE DE VALIDATION
+  // =====================================================
+
   async function submitChallenge(e) {
     e.preventDefault();
 
@@ -600,7 +791,10 @@ export default function Challenges({ userId }) {
     setSubmittingProof(false);
   }
 
-  // Accepter ou refuser une demande
+  // =====================================================
+  // VALIDATION OU REFUS D'UNE DEMANDE
+  // =====================================================
+
   async function reviewSubmission(submissionId, approved) {
     setBusySubmission(submissionId);
     setMessage("");
@@ -629,6 +823,10 @@ export default function Challenges({ userId }) {
     setBusySubmission(null);
   }
 
+  // =====================================================
+  // DONNÉES POUR L'AFFICHAGE
+  // =====================================================
+
   const allChallenges = [...initialChallenges, ...customChallenges];
 
   const filteredChallenges =
@@ -654,6 +852,16 @@ export default function Challenges({ userId }) {
   const pendingSubmissions = submissions.filter(
     (item) => item.status === "pending" && item.user_id !== userId
   );
+
+  const completedPublicCount = publicCompletions.filter((completion) =>
+    initialChallenges.some(
+      (challenge) => challenge.challengeKey === completion.challenge_key
+    )
+  ).length;
+
+  // =====================================================
+  // AFFICHAGE
+  // =====================================================
 
   return (
     <div className="challenges-page">
@@ -976,7 +1184,37 @@ export default function Challenges({ userId }) {
         )}
       </div>
 
-      {/* Liste des défis publics et classiques */}
+      {/* Missions publiques */}
+      <div className="challenges-section-heading">
+        <div>
+          <h2>MISSIONS PUBLIQUES</h2>
+          <p>
+            {completedPublicCount}/6 missions accomplies. Les récompenses
+            sont attribuées automatiquement.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          className="challenge-request-button"
+          onClick={() => checkAllPublicChallenges()}
+          disabled={
+            loadingGroups ||
+            !selectedGroup ||
+            checkingAllPublic ||
+            Boolean(checkingPublic)
+          }
+        >
+          {checkingAllPublic ? (
+            <LoaderCircle size={15} />
+          ) : (
+            <CheckCircle2 size={15} />
+          )}
+          {checkingAllPublic ? "VÉRIFICATION..." : "ACTUALISER"}
+        </button>
+      </div>
+
+      {/* Liste de tous les défis */}
       <div className="challenges-section-heading">
         <div>
           <h2>TOUS LES DÉFIS</h2>
@@ -1029,6 +1267,12 @@ export default function Challenges({ userId }) {
                 item.user_id !== userId
             );
 
+            const publicCompletion = !isCustom
+              ? publicCompletions.find(
+                  (item) => item.challenge_key === challenge.challengeKey
+                )
+              : null;
+
             return (
               <div className="challenge-card" key={challenge.id}>
                 <div className="challenge-card-top">
@@ -1042,10 +1286,13 @@ export default function Challenges({ userId }) {
                     >
                       {challenge.difficulty}
                     </span>
+
                     {isCustom &&
                       (challenge.createdBy === userId ||
                         ["admin", "owner", "creator"].includes(
-                          String(groupRoles[challenge.groupId] || "").toLowerCase()
+                          String(
+                            groupRoles[challenge.groupId] || ""
+                          ).toLowerCase()
                         )) && (
                         <button
                           type="button"
@@ -1081,10 +1328,34 @@ export default function Challenges({ userId }) {
                   </div>
 
                   {!isCustom ? (
-                    <span className="challenge-coming-soon">
-                      <Lock size={13} />
-                      BIENTÔT
-                    </span>
+                    publicCompletion ? (
+                      <span className="challenge-status-approved">
+                        <CheckCircle2 size={15} />
+                        VALIDÉ
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="challenge-request-button"
+                        disabled={
+                          !selectedGroup ||
+                          checkingAllPublic ||
+                          checkingPublic === challenge.challengeKey
+                        }
+                        onClick={() =>
+                          checkPublicChallenge(challenge.challengeKey)
+                        }
+                      >
+                        {checkingPublic === challenge.challengeKey ? (
+                          <LoaderCircle size={15} />
+                        ) : !selectedGroup ? (
+                          <Lock size={15} />
+                        ) : (
+                          <CheckCircle2 size={15} />
+                        )}
+                        {!selectedGroup ? "REJOINS UN GROUPE" : "VÉRIFIER"}
+                      </button>
+                    )
                   ) : mySubmission?.status === "approved" ? (
                     <span className="challenge-status-approved">
                       <CheckCircle2 size={15} />
@@ -1245,7 +1516,9 @@ export default function Challenges({ userId }) {
           Les défis personnalisés peuvent être créés par tous les membres
           de leur groupe. Leur validation par un autre membre permet
           d'attribuer les XP. Une description et une photo de preuve
-          apportent des bonus.
+          apportent des bonus. Les missions publiques sont vérifiées
+          automatiquement et leurs récompenses ne peuvent être obtenues
+          qu'une seule fois.
         </p>
       </div>
     </div>

@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   LoaderCircle,
   Users,
+  Trash2,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 
@@ -52,7 +53,7 @@ export default function Discussions({ userId }) {
 
     const { data: memberships, error: membershipError } = await supabase
       .from("group_members")
-      .select("group_id")
+      .select("group_id, role")
       .eq("user_id", userId);
 
     if (membershipError) {
@@ -79,9 +80,16 @@ export default function Discussions({ userId }) {
     if (groupsError) {
       setError("Impossible de charger les groupes.");
     } else {
-      setGroups(data || []);
-      if (data?.length > 0) {
-        setSelectedGroup(data[0].id);
+      const groupsWithRole = (data || []).map((group) => ({
+        ...group,
+        role:
+          memberships.find((membership) => membership.group_id === group.id)
+            ?.role || "member",
+      }));
+
+      setGroups(groupsWithRole);
+      if (groupsWithRole.length > 0) {
+        setSelectedGroup(groupsWithRole[0].id);
       }
     }
 
@@ -213,6 +221,35 @@ export default function Discussions({ userId }) {
     setMessages((previous) => [...previous, data]);
     await loadProfiles([userId]);
     setMessageText("");
+  }
+
+  async function deleteDiscussion(discussion) {
+    if (!discussion) return;
+
+    const confirmed = window.confirm(
+      `Supprimer définitivement la discussion « ${discussion.title} » et tous ses messages ?`
+    );
+
+    if (!confirmed) return;
+
+    const { error } = await supabase
+      .from("group_discussions")
+      .delete()
+      .eq("id", discussion.id);
+
+    if (error) {
+      setError("Impossible de supprimer cette discussion : " + error.message);
+      return;
+    }
+
+    setDiscussions((previous) =>
+      previous.filter((item) => item.id !== discussion.id)
+    );
+
+    if (selectedDiscussion?.id === discussion.id) {
+      setSelectedDiscussion(null);
+      setMessages([]);
+    }
   }
 
   function formatDate(date) {
@@ -365,6 +402,20 @@ export default function Discussions({ userId }) {
                   <span>SUJET DE DISCUSSION</span>
                   <h2>{selectedDiscussion.title}</h2>
                 </div>
+
+                {(selectedDiscussion.created_by === userId ||
+                  groups.find((group) => group.id === selectedGroup)?.role ===
+                    "admin") && (
+                  <button
+                    type="button"
+                    className="discussion-delete-button"
+                    onClick={() => deleteDiscussion(selectedDiscussion)}
+                    title="Supprimer cette discussion"
+                    aria-label="Supprimer cette discussion"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                )}
               </div>
 
               <div className="discussion-original-post">
