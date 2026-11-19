@@ -27,8 +27,6 @@ import { supabase } from "../lib/supabase";
 const STORAGE_BUCKET = "group-experience-photos";
 const MAX_PHOTO_SIZE = 5 * 1024 * 1024;
 
-const filters = ["TOUS", "PROFIL", "SOCIAL", "GROUPE", "RÉGULARITÉ"];
-
 const initialChallenges = [
   {
     id: 1,
@@ -64,7 +62,8 @@ const initialChallenges = [
     id: 4,
     challengeKey: "create_group_challenge",
     title: "Organise un défi collectif",
-    description: "Propose une activité à réaliser avec les membres de ton groupe.",
+    description:
+      "Propose une activité à réaliser avec les membres de ton groupe.",
     xp: 75,
     category: "Groupe",
     icon: Target,
@@ -85,7 +84,8 @@ const initialChallenges = [
     id: 6,
     challengeKey: "evolve_profile",
     title: "Fais évoluer ton profil",
-    description: "Personnalise à nouveau ton profil après l'avoir complété.",
+    description:
+      "Personnalise à nouveau ton profil après l'avoir complété.",
     xp: 40,
     category: "Profil",
     icon: Star,
@@ -93,34 +93,61 @@ const initialChallenges = [
   },
 ];
 
+// Normalisation des titres pour éviter les différences de casse
+// ou d'espacement lors de la comparaison.
+function normalizeChallengeTitle(title) {
+  return String(title || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+// Titres des missions prédéfinies à ne jamais afficher
+// dans l'onglet Défis publics.
+const BASE_CHALLENGE_TITLES = new Set([
+  ...initialChallenges.map((challenge) =>
+    normalizeChallengeTitle(challenge.title)
+  ),
+
+  // Anciens intitulés éventuellement présents en base.
+  "lance une discussion",
+  "rejoins un groupe",
+]);
+
 function getSubmissionPoints(challenge, submission) {
   const basePoints = Number(challenge.xp) || 0;
+
   const descriptionBonus =
     submission.proof_description?.trim().length > 0 ? 40 : 0;
+
   const photoBonus = submission.photo_path ? 50 : 0;
 
   return basePoints + descriptionBonus + photoBonus;
 }
 
 export default function Challenges({ userId }) {
-  const [activeFilter, setActiveFilter] = useState("TOUS");
+  // Navigation entre les deux catégories
+  const [activeTab, setActiveTab] = useState("personal");
 
+  // Groupes
   const [groups, setGroups] = useState([]);
+  const [selectedGroup, setSelectedGroup] = useState("");
+  const [groupRoles, setGroupRoles] = useState({});
+
+  // Défis publics créés par les membres
   const [customChallenges, setCustomChallenges] = useState([]);
   const [submissions, setSubmissions] = useState([]);
   const [memberNames, setMemberNames] = useState({});
-  const [groupRoles, setGroupRoles] = useState({});
 
-  // Missions publiques
-  const [publicCompletions, setPublicCompletions] = useState([]);
-  const [loadingPublicCompletions, setLoadingPublicCompletions] =
+  // Progression des défis personnels
+  const [personalCompletions, setPersonalCompletions] = useState([]);
+  const [loadingPersonalCompletions, setLoadingPersonalCompletions] =
     useState(true);
   const [checkingPublic, setCheckingPublic] = useState(null);
   const [checkingAllPublic, setCheckingAllPublic] = useState(false);
 
-  // Création de défi
+  // Création d'un défi public
   const [showForm, setShowForm] = useState(false);
-  const [selectedGroup, setSelectedGroup] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [rewardPoints, setRewardPoints] = useState("60");
@@ -142,17 +169,17 @@ export default function Challenges({ userId }) {
   const [message, setMessage] = useState("");
 
   // =====================================================
-  // MISSIONS PUBLIQUES
+  // CHARGEMENT DES DÉFIS PERSONNELS TERMINÉS
   // =====================================================
 
-  async function refreshPublicCompletions() {
+  async function refreshPersonalCompletions() {
     if (!userId) {
-      setPublicCompletions([]);
-      setLoadingPublicCompletions(false);
+      setPersonalCompletions([]);
+      setLoadingPersonalCompletions(false);
       return;
     }
 
-    setLoadingPublicCompletions(true);
+    setLoadingPersonalCompletions(true);
 
     try {
       const { data, error } = await supabase
@@ -161,34 +188,37 @@ export default function Challenges({ userId }) {
         .eq("user_id", userId);
 
       if (error) {
-        console.error("Erreur chargement missions publiques :", error);
+        console.error("Erreur chargement défis personnels :", error);
+        setMessage("Impossible de charger ta progression personnelle.");
         return;
       }
 
-      setPublicCompletions(data || []);
+      setPersonalCompletions(data || []);
     } finally {
-      setLoadingPublicCompletions(false);
+      setLoadingPersonalCompletions(false);
     }
   }
 
   useEffect(() => {
-    refreshPublicCompletions();
+    refreshPersonalCompletions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  async function checkPublicChallenge(
+  // =====================================================
+  // VÉRIFICATION D'UN DÉFI PERSONNEL
+  // =====================================================
+
+  async function checkPersonalChallenge(
     challengeKey,
-    groupId = selectedGroup,
-    silent = false
+    groupId = selectedGroup
   ) {
     if (!userId || !groupId) {
-      if (!silent) {
-        setMessage("Tu dois rejoindre un groupe pour vérifier cette mission.");
-      }
+      setMessage("Tu dois rejoindre un groupe pour vérifier ce défi.");
       return;
     }
 
     setCheckingPublic(challengeKey);
+    setMessage("");
 
     try {
       const { data, error } = await supabase.rpc(
@@ -200,52 +230,45 @@ export default function Challenges({ userId }) {
       );
 
       if (error) {
-        console.error("Erreur vérification mission :", error);
-
-        if (!silent) {
-          setMessage(
-            "Impossible de vérifier la mission : " + error.message
-          );
-        }
-
+        console.error("Erreur vérification défi personnel :", error);
+        setMessage("Impossible de vérifier le défi : " + error.message);
         return;
       }
 
-      await refreshPublicCompletions();
-
-      if (silent) return;
+      await refreshPersonalCompletions();
 
       if (data?.status === "completed") {
         if (Number(data.points_awarded) > 0) {
           setMessage(
-            `Mission validée ! Tu remportes ${data.points_awarded} XP.`
+            `Défi validé ! Tu remportes ${data.points_awarded} XP.`
           );
         } else {
           setMessage(
-            "Mission validée ! La récompense avait déjà été attribuée."
+            "Défi validé ! La récompense avait déjà été attribuée."
           );
         }
       } else if (data?.status === "already_completed") {
-        setMessage("Cette mission a déjà été validée.");
+        setMessage("Ce défi a déjà été validé.");
       } else if (data?.status === "not_eligible") {
         setMessage(
-          "Mission non validée pour le moment. Continue tes activités et réessaie."
+          "Tu ne remplis pas encore les conditions. Continue tes activités et réessaie."
         );
       } else {
-        setMessage("La vérification de la mission est terminée.");
+        setMessage("La vérification du défi est terminée.");
       }
     } catch (error) {
       console.error("Erreur inattendue :", error);
-
-      if (!silent) {
-        setMessage("Une erreur est survenue pendant la vérification.");
-      }
+      setMessage("Une erreur est survenue pendant la vérification.");
     } finally {
       setCheckingPublic(null);
     }
   }
 
-  async function checkAllPublicChallenges(groupId = selectedGroup) {
+  // =====================================================
+  // VÉRIFICATION AUTOMATIQUE DES DÉFIS PERSONNELS
+  // =====================================================
+
+  async function checkAllPersonalChallenges(groupId = selectedGroup) {
     if (!userId || !groupId || checkingAllPublic) return;
 
     setCheckingAllPublic(true);
@@ -264,23 +287,24 @@ export default function Challenges({ userId }) {
 
         if (error) {
           console.error(
-            `Erreur mission ${challenge.challengeKey} :`,
+            `Erreur défi ${challenge.challengeKey} :`,
             error
           );
+
           hasError = true;
         }
       }
 
-      await refreshPublicCompletions();
+      await refreshPersonalCompletions();
 
       if (hasError) {
         setMessage(
-          "Certaines missions n'ont pas pu être vérifiées. Réessaie."
+          "Certains défis n'ont pas pu être vérifiés. Réessaie."
         );
       }
     } catch (error) {
       console.error("Erreur vérification globale :", error);
-      setMessage("Impossible de vérifier toutes les missions.");
+      setMessage("Impossible de vérifier tous les défis.");
     } finally {
       setCheckingAllPublic(false);
     }
@@ -288,7 +312,7 @@ export default function Challenges({ userId }) {
 
   useEffect(() => {
     if (!loadingGroups && selectedGroup && userId) {
-      checkAllPublicChallenges(selectedGroup);
+      checkAllPersonalChallenges(selectedGroup);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadingGroups, selectedGroup, userId]);
@@ -317,6 +341,7 @@ export default function Challenges({ userId }) {
         console.error("Erreur récupération groupes :", membershipError);
         setMessage("Impossible de récupérer tes groupes.");
         setGroups([]);
+        setSelectedGroup("");
         setLoadingGroups(false);
         return;
       }
@@ -348,6 +373,7 @@ export default function Challenges({ userId }) {
       if (groupsError) {
         console.error("Erreur chargement groupes :", groupsError);
         setGroups([]);
+        setSelectedGroup("");
       } else {
         setGroups(loadedGroups || []);
 
@@ -369,7 +395,7 @@ export default function Challenges({ userId }) {
   }, [userId]);
 
   // =====================================================
-  // CHARGEMENT DES DÉFIS PERSONNALISÉS
+  // CHARGEMENT DES DÉFIS PUBLICS CRÉÉS PAR LES MEMBRES
   // =====================================================
 
   useEffect(() => {
@@ -389,6 +415,8 @@ export default function Challenges({ userId }) {
 
       if (membershipError) {
         console.error("Erreur récupération groupes :", membershipError);
+        setMessage("Impossible de récupérer les groupes.");
+        setCustomChallenges([]);
         setLoadingChallenges(false);
         return;
       }
@@ -408,26 +436,42 @@ export default function Challenges({ userId }) {
         .select("*")
         .in("group_id", groupIds)
         .eq("is_active", true)
+        .not("created_by", "is", null)
         .order("created_at", { ascending: false });
 
       if (error) {
-        console.error("Erreur chargement défis :", error);
+        console.error("Erreur chargement défis publics :", error);
         setMessage("Impossible de récupérer les défis enregistrés.");
+        setCustomChallenges([]);
         setLoadingChallenges(false);
         return;
       }
 
-      const formattedChallenges = (data || []).map((challenge) => ({
-        id: challenge.id,
-        title: challenge.title,
-        description: challenge.description,
-        xp: Number(challenge.points) || 0,
-        category: "Groupe",
-        icon: Target,
-        difficulty: "PERSONNALISÉ",
-        groupId: challenge.group_id,
-        createdBy: challenge.created_by,
-      }));
+      // Double filtre :
+      // 1. Le défi doit avoir été créé par un membre.
+      // 2. Son titre ne doit pas correspondre à une mission prédéfinie.
+      const formattedChallenges = (data || [])
+        .filter((challenge) => {
+          const normalizedTitle = normalizeChallengeTitle(
+            challenge.title
+          );
+
+          return (
+            Boolean(challenge.created_by) &&
+            !BASE_CHALLENGE_TITLES.has(normalizedTitle)
+          );
+        })
+        .map((challenge) => ({
+          id: challenge.id,
+          title: challenge.title,
+          description: challenge.description,
+          xp: Number(challenge.points) || 0,
+          category: "Public",
+          icon: Target,
+          difficulty: "PUBLIC",
+          groupId: challenge.group_id,
+          createdBy: challenge.created_by,
+        }));
 
       setCustomChallenges(formattedChallenges);
       setLoadingChallenges(false);
@@ -437,7 +481,7 @@ export default function Challenges({ userId }) {
   }, [userId]);
 
   // =====================================================
-  // CHARGEMENT DES DEMANDES DE VALIDATION
+  // CHARGEMENT DES PARTICIPATIONS AUX DÉFIS PUBLICS
   // =====================================================
 
   async function loadSubmissions() {
@@ -450,7 +494,9 @@ export default function Challenges({ userId }) {
 
     setLoadingSubmissions(true);
 
-    const challengeIds = customChallenges.map((challenge) => challenge.id);
+    const challengeIds = customChallenges.map(
+      (challenge) => challenge.id
+    );
 
     const { data, error } = await supabase
       .from("group_challenge_submissions")
@@ -459,7 +505,7 @@ export default function Challenges({ userId }) {
       .order("submitted_at", { ascending: false });
 
     if (error) {
-      console.error("Erreur chargement demandes :", error);
+      console.error("Erreur chargement participations :", error);
       setMessage("Impossible de charger les demandes de validation.");
       setLoadingSubmissions(false);
       return;
@@ -469,9 +515,10 @@ export default function Challenges({ userId }) {
       (data || []).map(async (submission) => {
         if (!submission.photo_path) return submission;
 
-        const { data: signedData, error: signedError } = await supabase.storage
-          .from(STORAGE_BUCKET)
-          .createSignedUrl(submission.photo_path, 3600);
+        const { data: signedData, error: signedError } =
+          await supabase.storage
+            .from(STORAGE_BUCKET)
+            .createSignedUrl(submission.photo_path, 3600);
 
         if (signedError) {
           console.error("Erreur URL photo :", signedError);
@@ -523,7 +570,7 @@ export default function Challenges({ userId }) {
   }, [userId, customChallenges]);
 
   // =====================================================
-  // CRÉATION D'UN DÉFI PERSONNALISÉ
+  // CRÉATION D'UN DÉFI PUBLIC
   // =====================================================
 
   async function createChallenge(e) {
@@ -544,8 +591,12 @@ export default function Challenges({ userId }) {
       return;
     }
 
-    if (cleanTitle.toLowerCase() === "organise un défi collectif") {
-      setMessage("Ce titre est réservé au défi public.");
+    if (
+      BASE_CHALLENGE_TITLES.has(normalizeChallengeTitle(cleanTitle))
+    ) {
+      setMessage(
+        "Ce titre est réservé à une mission prédéfinie. Choisis un autre titre."
+      );
       return;
     }
 
@@ -577,9 +628,9 @@ export default function Challenges({ userId }) {
       title: data.title,
       description: data.description,
       xp: Number(data.points) || 0,
-      category: "Groupe",
+      category: "Public",
       icon: Target,
-      difficulty: "PERSONNALISÉ",
+      difficulty: "PUBLIC",
       groupId: data.group_id,
       createdBy: data.created_by,
     };
@@ -594,13 +645,16 @@ export default function Challenges({ userId }) {
     setRewardPoints("60");
     setShowForm(false);
 
-    await checkPublicChallenge("create_group_challenge", selectedGroup, true);
+    await checkPersonalChallenge(
+      "create_group_challenge",
+      selectedGroup
+    );
 
-    setMessage("Défi créé avec succès !");
+    setMessage("Défi public créé avec succès !");
   }
 
   // =====================================================
-  // SUPPRESSION D'UN DÉFI PERSONNALISÉ
+  // SUPPRESSION D'UN DÉFI PUBLIC
   // =====================================================
 
   async function deleteChallenge(challenge) {
@@ -621,7 +675,7 @@ export default function Challenges({ userId }) {
     if (error) {
       console.error("Erreur suppression défi :", error);
       setMessage(
-        "Impossible de supprimer ce défi. Vérifie tes autorisations ou les demandes qui lui sont associées. " +
+        "Impossible de supprimer ce défi. Vérifie tes autorisations. " +
           error.message
       );
       setDeletingChallenge(null);
@@ -671,6 +725,7 @@ export default function Challenges({ userId }) {
 
   function handleProofFile(e) {
     const file = e.target.files?.[0];
+
     if (!file) return;
 
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
@@ -695,7 +750,7 @@ export default function Challenges({ userId }) {
   }
 
   // =====================================================
-  // ENVOI D'UNE DEMANDE DE VALIDATION
+  // ENVOI D'UNE PARTICIPATION
   // =====================================================
 
   async function submitChallenge(e) {
@@ -704,6 +759,13 @@ export default function Challenges({ userId }) {
     if (!userId || !activeChallenge?.groupId) return;
 
     const cleanProof = proofDescription.trim();
+
+    if (!cleanProof && !proofFile) {
+      setMessage(
+        "Ajoute une description ou une photo pour présenter ta preuve."
+      );
+      return;
+    }
 
     if (cleanProof.length > 2000) {
       setMessage("La description ne doit pas dépasser 2000 caractères.");
@@ -719,6 +781,7 @@ export default function Challenges({ userId }) {
       if (proofFile) {
         const extension =
           proofFile.name.split(".").pop()?.toLowerCase() || "jpg";
+
         const fileName = `${crypto.randomUUID()}.${extension}`;
 
         uploadedPath = `${activeChallenge.groupId}/${userId}/${fileName}`;
@@ -750,11 +813,13 @@ export default function Challenges({ userId }) {
 
       if (error) {
         throw new Error(
-          "Impossible d'envoyer la demande : " + error.message
+          "Impossible d'envoyer la participation : " + error.message
         );
       }
 
-      setMessage("Demande envoyée ! Un autre membre pourra la valider.");
+      setMessage(
+        "Participation envoyée ! Un autre membre pourra la valider."
+      );
 
       if (proofPreview) {
         URL.revokeObjectURL(proofPreview);
@@ -783,13 +848,13 @@ export default function Challenges({ userId }) {
       }
 
       setMessage(error.message || "Une erreur est survenue.");
+    } finally {
+      setSubmittingProof(false);
     }
-
-    setSubmittingProof(false);
   }
 
   // =====================================================
-  // VALIDATION OU REFUS D'UNE DEMANDE
+  // VALIDATION OU REFUS D'UNE PARTICIPATION
   // =====================================================
 
   async function reviewSubmission(submissionId, approved) {
@@ -811,7 +876,7 @@ export default function Challenges({ userId }) {
       setMessage(
         data === "approved"
           ? "Défi validé ! Les XP ont été attribués."
-          : "Demande refusée."
+          : "Participation refusée."
       );
 
       await loadSubmissions();
@@ -821,13 +886,23 @@ export default function Challenges({ userId }) {
   }
 
   // =====================================================
-  // DONNÉES POUR L'AFFICHAGE
+  // DONNÉES CALCULÉES
   // =====================================================
 
-  const allChallenges = [...initialChallenges, ...customChallenges];
+  const completedPersonalKeys = new Set(
+    personalCompletions.map((item) => item.challenge_key)
+  );
 
-  const completedPublicKeys = new Set(
-    publicCompletions.map((item) => item.challenge_key)
+  const availablePersonalChallenges = initialChallenges.filter(
+    (challenge) =>
+      !completedPersonalKeys.has(challenge.challengeKey)
+  );
+
+  const selectedGroupName =
+    groups.find((group) => group.id === selectedGroup)?.name || "";
+
+  const selectedGroupChallenges = customChallenges.filter(
+    (challenge) => challenge.groupId === selectedGroup
   );
 
   const completedCustomIds = new Set(
@@ -840,38 +915,49 @@ export default function Challenges({ userId }) {
       .map((item) => item.challenge_id)
   );
 
-  // Retirer les missions déjà terminées
-  const availableChallenges = allChallenges.filter((challenge) => {
-    if (challenge.challengeKey) {
-      return !completedPublicKeys.has(challenge.challengeKey);
-    }
+  const availablePublicChallenges = selectedGroupChallenges.filter(
+    (challenge) => !completedCustomIds.has(challenge.id)
+  );
 
-    return !completedCustomIds.has(challenge.id);
+  const pendingSubmissions = submissions.filter((submission) => {
+    const challenge = selectedGroupChallenges.find(
+      (item) => item.id === submission.challenge_id
+    );
+
+    return (
+      challenge &&
+      submission.status === "pending" &&
+      submission.user_id !== userId
+    );
   });
 
-  // Filtrage par catégorie
-  const filteredChallenges =
-    activeFilter === "TOUS"
-      ? availableChallenges
-      : availableChallenges.filter(
-          (challenge) =>
-            challenge.category.toUpperCase() === activeFilter
-        );
-
-  const totalXP = availableChallenges.reduce(
+  const personalXPAvailable = availablePersonalChallenges.reduce(
     (total, challenge) => total + challenge.xp,
     0
   );
 
-  const pendingSubmissions = submissions.filter(
-    (item) => item.status === "pending" && item.user_id !== userId
+  const publicXPAvailable = availablePublicChallenges.reduce(
+    (total, challenge) => total + challenge.xp,
+    0
   );
 
-  const completedPublicCount = publicCompletions.filter((completion) =>
-    initialChallenges.some(
-      (challenge) => challenge.challengeKey === completion.challenge_key
-    )
+  const completedPersonalCount = personalCompletions.filter(
+    (completion) =>
+      initialChallenges.some(
+        (challenge) =>
+          challenge.challengeKey === completion.challenge_key
+      )
   ).length;
+
+  const personalLoading =
+    loadingGroups ||
+    loadingPersonalCompletions ||
+    checkingAllPublic;
+
+  const publicLoading =
+    loadingGroups ||
+    loadingChallenges ||
+    loadingSubmissions;
 
   // =====================================================
   // AFFICHAGE
@@ -879,6 +965,7 @@ export default function Challenges({ userId }) {
 
   return (
     <div className="challenges-page">
+      {/* EN-TÊTE */}
       <div className="challenges-header">
         <div>
           <div className="challenges-eyebrow">
@@ -901,14 +988,16 @@ export default function Challenges({ userId }) {
         </div>
       </div>
 
+      {/* STATISTIQUES */}
       <div className="challenges-stats">
         <div className="challenge-stat-card">
           <div className="challenge-stat-icon">
-            <Target size={20} />
+            <UserRound size={20} />
           </div>
+
           <div>
-            <strong>{availableChallenges.length}</strong>
-            <span>DÉFIS DISPONIBLES</span>
+            <strong>{completedPersonalCount}/6</strong>
+            <span>DÉFIS PERSO TERMINÉS</span>
           </div>
         </div>
 
@@ -916,9 +1005,14 @@ export default function Challenges({ userId }) {
           <div className="challenge-stat-icon">
             <Zap size={20} />
           </div>
+
           <div>
-            <strong>{totalXP} XP</strong>
-            <span>XP DE BASE À GAGNER</span>
+            <strong>
+              {activeTab === "personal"
+                ? `${personalXPAvailable} XP`
+                : `${publicXPAvailable} XP`}
+            </strong>
+            <span>XP DISPONIBLES</span>
           </div>
         </div>
 
@@ -926,44 +1020,266 @@ export default function Challenges({ userId }) {
           <div className="challenge-stat-icon">
             <CalendarDays size={20} />
           </div>
+
           <div>
-            <strong>
-              {submissions.filter((item) => item.status === "pending").length}
-            </strong>
-            <span>DEMANDES EN ATTENTE</span>
+            <strong>{pendingSubmissions.length}</strong>
+            <span>DEMANDES À VALIDER</span>
           </div>
         </div>
       </div>
 
-      {/* Création de défi classique */}
-      <div className="challenge-create-section">
+      {/* DEUX ONGLETS PRINCIPAUX */}
+      <div className="challenge-tabs">
         <button
-          className="challenge-create-button"
+          type="button"
+          className={`challenge-tab ${
+            activeTab === "personal" ? "active" : ""
+          }`}
           onClick={() => {
-            setShowForm(!showForm);
+            setActiveTab("personal");
             setMessage("");
           }}
         >
-          {showForm ? <X size={18} /> : <Plus size={18} />}
-          {showForm ? "FERMER" : "CRÉER UN DÉFI"}
+          <UserRound size={18} />
+          <span>DÉFIS PERSO</span>
+          <small>{availablePersonalChallenges.length}</small>
         </button>
 
-        {showForm && (
-          <form className="challenge-create-form" onSubmit={createChallenge}>
-            <h2>NOUVEAU DÉFI</h2>
-            <p>Tout membre d'un groupe peut proposer un défi.</p>
+        <button
+          type="button"
+          className={`challenge-tab ${
+            activeTab === "public" ? "active" : ""
+          }`}
+          onClick={() => {
+            setActiveTab("public");
+            setMessage("");
+          }}
+        >
+          <Users size={18} />
+          <span>DÉFIS PUBLICS</span>
+          <small>{selectedGroupChallenges.length}</small>
+        </button>
+      </div>
 
-            {loadingGroups ? (
-              <p>Chargement des groupes...</p>
+      {/* MESSAGE GLOBAL */}
+      {message && !activeChallenge && (
+        <p className="challenge-create-message">{message}</p>
+      )}
+
+      {/* ================================================= */}
+      {/* ONGLET DÉFIS PERSONNELS */}
+      {/* ================================================= */}
+
+      {activeTab === "personal" && (
+        <section className="challenge-tab-content">
+          <div className="challenges-section-heading">
+            <div>
+              <h2>TES DÉFIS PERSONNELS</h2>
+              <p>
+                Ces défis sont individuels. Ta progression n'est visible
+                que par toi.
+              </p>
+            </div>
+
+            <span className="challenge-count">
+              {completedPersonalCount}/6 TERMINÉS
+            </span>
+          </div>
+
+          {/* Groupe nécessaire pour le contexte de vérification RPC */}
+          {!loadingGroups && groups.length > 0 && (
+            <div className="challenge-group-selector">
+              <label htmlFor="personal-group-select">
+                GROUPE DE RÉFÉRENCE
+              </label>
+
+              <select
+                id="personal-group-select"
+                value={selectedGroup}
+                onChange={(e) => {
+                  setSelectedGroup(e.target.value);
+                  setMessage("");
+                }}
+              >
+                {groups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+
+              <p>
+                Ce groupe sert uniquement de contexte pour vérifier tes
+                défis. Ta progression personnelle reste indépendante du groupe.
+              </p>
+            </div>
+          )}
+
+          <div className="challenges-section-heading">
+            <div>
+              <h2>MISSIONS INDIVIDUELLES</h2>
+              <p>
+                Les récompenses sont attribuées automatiquement lorsque
+                les conditions sont remplies.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="challenge-request-button"
+              onClick={() => checkAllPersonalChallenges()}
+              disabled={
+                !selectedGroup ||
+                personalLoading ||
+                Boolean(checkingPublic)
+              }
+            >
+              {checkingAllPublic ? (
+                <LoaderCircle size={15} />
+              ) : (
+                <CheckCircle2 size={15} />
+              )}
+
+              {checkingAllPublic
+                ? "VÉRIFICATION..."
+                : "ACTUALISER"}
+            </button>
+          </div>
+
+          <div className="challenges-grid">
+            {personalLoading ? (
+              <div className="challenges-loading">
+                <LoaderCircle size={22} />
+                <p>Chargement de tes défis personnels...</p>
+              </div>
             ) : groups.length === 0 ? (
-              <p>Tu dois rejoindre un groupe pour créer un défi.</p>
+              <div className="challenges-loading">
+                <Lock size={25} />
+                <p>
+                  Rejoins un groupe pour pouvoir vérifier et valider tes
+                  défis personnels.
+                </p>
+              </div>
+            ) : availablePersonalChallenges.length === 0 ? (
+              <div className="challenges-loading">
+                <Trophy size={25} />
+                <p>
+                  Bravo ! Tu as terminé tous tes défis personnels.
+                  Retrouve tes réussites dans l'onglet Réussites.
+                </p>
+              </div>
             ) : (
-              <>
-                <label>GROUPE</label>
+              availablePersonalChallenges.map((challenge) => {
+                const Icon = challenge.icon;
+
+                return (
+                  <div className="challenge-card" key={challenge.id}>
+                    <div className="challenge-card-top">
+                      <div className="challenge-icon">
+                        <Icon size={23} />
+                      </div>
+
+                      <span
+                        className={`challenge-difficulty ${challenge.difficulty.toLowerCase()}`}
+                      >
+                        {challenge.difficulty}
+                      </span>
+                    </div>
+
+                    <div className="challenge-card-content">
+                      <span className="challenge-category">
+                        DÉFI PERSONNEL
+                      </span>
+
+                      <h3>{challenge.title}</h3>
+                      <p>{challenge.description}</p>
+                    </div>
+
+                    <div className="challenge-card-footer">
+                      <div className="challenge-reward">
+                        <Zap size={17} />
+                        <strong>+{challenge.xp} XP</strong>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="challenge-request-button"
+                        disabled={
+                          checkingAllPublic ||
+                          checkingPublic === challenge.challengeKey
+                        }
+                        onClick={() =>
+                          checkPersonalChallenge(challenge.challengeKey)
+                        }
+                      >
+                        {checkingPublic === challenge.challengeKey ? (
+                          <LoaderCircle size={15} />
+                        ) : (
+                          <CheckCircle2 size={15} />
+                        )}
+
+                        VÉRIFIER
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <div className="challenges-info">
+            <Lock size={19} />
+            <p>
+              Les défis personnels sont propres à ton compte. Leur progression
+              et leurs récompenses ne dépendent pas de celles des autres
+              membres du groupe.
+            </p>
+          </div>
+        </section>
+      )}
+
+      {/* ================================================= */}
+      {/* ONGLET DÉFIS PUBLICS */}
+      {/* ================================================= */}
+
+      {activeTab === "public" && (
+        <section className="challenge-tab-content">
+          <div className="challenges-section-heading">
+            <div>
+              <h2>LES DÉFIS DE TON GROUPE</h2>
+              <p>
+                Tous les membres du groupe peuvent participer aux mêmes défis.
+              </p>
+            </div>
+          </div>
+
+          {loadingGroups ? (
+            <div className="challenges-loading">
+              <LoaderCircle size={22} />
+              <p>Chargement de tes groupes...</p>
+            </div>
+          ) : groups.length === 0 ? (
+            <div className="challenges-loading">
+              <Users size={25} />
+              <p>
+                Tu dois rejoindre un groupe pour découvrir et créer des
+                défis publics.
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* SÉLECTION DU GROUPE */}
+              <div className="challenge-group-selector">
+                <label htmlFor="public-group-select">GROUPE</label>
+
                 <select
+                  id="public-group-select"
                   value={selectedGroup}
-                  onChange={(e) => setSelectedGroup(e.target.value)}
-                  required
+                  onChange={(e) => {
+                    setSelectedGroup(e.target.value);
+                    setMessage("");
+                    setShowForm(false);
+                  }}
                 >
                   {groups.map((group) => (
                     <option key={group.id} value={group.id}>
@@ -972,375 +1288,386 @@ export default function Challenges({ userId }) {
                   ))}
                 </select>
 
-                <label>TITRE DU DÉFI</label>
-                <input
-                  type="text"
-                  placeholder="Ex : Organiser une activité..."
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  maxLength={80}
-                  required
-                />
-
-                <label>DESCRIPTION</label>
-                <textarea
-                  placeholder="Explique les objectifs du défi..."
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  maxLength={500}
-                  rows={4}
-                  required
-                />
-
-                <label>RÉCOMPENSE EN XP</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="1000"
-                  step="1"
-                  value={rewardPoints}
-                  onChange={(e) => setRewardPoints(e.target.value)}
-                  required
-                />
-
-                <p className="challenge-reward-explanation">
-                  La récompense choisie est attribuée après validation.
-                  Une description de preuve rapporte +40 XP et une photo
-                  rapporte +50 XP.
+                <p>
+                  Tu consultes les défis publics de{" "}
+                  <strong>{selectedGroupName}</strong>. Les défis des autres
+                  groupes ne sont pas affichés ici.
                 </p>
+              </div>
 
+              {/* CRÉATION D'UN DÉFI PUBLIC */}
+              <div className="challenge-create-section">
                 <button
-                  type="submit"
-                  className="challenge-submit-button"
-                  disabled={creating || loadingGroups}
+                  type="button"
+                  className="challenge-create-button"
+                  onClick={() => {
+                    setShowForm(!showForm);
+                    setMessage("");
+                  }}
                 >
-                  {creating ? (
-                    <LoaderCircle size={17} />
-                  ) : (
-                    <Plus size={17} />
-                  )}
-                  {creating ? "CRÉATION..." : "PUBLIER LE DÉFI"}
+                  {showForm ? <X size={18} /> : <Plus size={18} />}
+                  {showForm ? "FERMER" : "CRÉER UN DÉFI PUBLIC"}
                 </button>
-              </>
-            )}
 
-            {message && (
-              <p className="challenge-create-message">{message}</p>
-            )}
-          </form>
-        )}
+                {showForm && (
+                  <form
+                    className="challenge-create-form"
+                    onSubmit={createChallenge}
+                  >
+                    <h2>NOUVEAU DÉFI PUBLIC</h2>
 
-        {!showForm && message && (
-          <p className="challenge-create-message">{message}</p>
-        )}
-      </div>
+                    <p>
+                      Propose un défi auquel tous les membres de{" "}
+                      {selectedGroupName} pourront participer.
+                    </p>
 
-      {/* Demandes à valider */}
-      <div className="challenges-section-heading">
-        <div>
-          <h2>DEMANDES À VALIDER</h2>
-          <p>Examine les preuves des autres membres de ton groupe.</p>
-        </div>
-      </div>
-
-      <div className="challenge-submissions">
-        {loadingSubmissions ? (
-          <div className="challenges-loading">
-            <LoaderCircle size={22} />
-            <p>Chargement des demandes...</p>
-          </div>
-        ) : pendingSubmissions.length === 0 ? (
-          <div className="challenges-loading">
-            <Clock size={22} />
-            <p>Aucune demande à valider pour le moment.</p>
-          </div>
-        ) : (
-          pendingSubmissions.map((submission) => {
-            const challenge = customChallenges.find(
-              (item) => item.id === submission.challenge_id
-            );
-
-            if (!challenge) return null;
-
-            return (
-              <div className="challenge-submission-card" key={submission.id}>
-                <div className="challenge-submission-info">
-                  <strong>{challenge.title}</strong>
-
-                  <span>
-                    Demande de{" "}
-                    <strong className="challenge-member-name">
-                      {memberNames[submission.user_id] || "Membre"}
-                    </strong>
-                  </span>
-
-                  {submission.proof_description && (
-                    <div className="challenge-proof-description">
-                      <FileText size={15} />
-                      <span>{submission.proof_description}</span>
-                    </div>
-                  )}
-
-                  {submission.photoUrl && (
-                    <img
-                      src={submission.photoUrl}
-                      alt="Preuve du défi"
-                      className="challenge-proof-image"
+                    <label>TITRE DU DÉFI</label>
+                    <input
+                      type="text"
+                      placeholder="Ex : Organiser une activité..."
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      maxLength={80}
+                      required
                     />
-                  )}
 
-                  <span>
-                    Récompense potentielle :{" "}
-                    <strong>
-                      +{getSubmissionPoints(challenge, submission)} XP
-                    </strong>
-                  </span>
-                </div>
+                    <label>DESCRIPTION</label>
+                    <textarea
+                      placeholder="Explique les objectifs du défi..."
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      maxLength={500}
+                      rows={4}
+                      required
+                    />
 
-                <div className="challenge-submission-actions">
-                  <button
-                    type="button"
-                    className="challenge-approve-button"
-                    disabled={busySubmission === submission.id}
-                    onClick={() => reviewSubmission(submission.id, true)}
-                  >
-                    {busySubmission === submission.id ? (
-                      <LoaderCircle size={16} />
-                    ) : (
-                      <Check size={16} />
-                    )}
-                    Accepter
-                  </button>
+                    <label>RÉCOMPENSE EN XP</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="1000"
+                      step="1"
+                      value={rewardPoints}
+                      onChange={(e) => setRewardPoints(e.target.value)}
+                      required
+                    />
 
-                  <button
-                    type="button"
-                    className="challenge-reject-button"
-                    disabled={busySubmission === submission.id}
-                    onClick={() => reviewSubmission(submission.id, false)}
-                  >
-                    <XCircle size={16} />
-                    Refuser
-                  </button>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
+                    <p className="challenge-reward-explanation">
+                      La récompense choisie est attribuée après validation.
+                      Une description de preuve rapporte +40 XP et une photo
+                      rapporte +50 XP.
+                    </p>
 
-      {/* Missions publiques */}
-      <div className="challenges-section-heading">
-        <div>
-          <h2>MISSIONS PUBLIQUES</h2>
-          <p>
-            {completedPublicCount}/6 missions accomplies. Les récompenses
-            sont attribuées automatiquement.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          className="challenge-request-button"
-          onClick={() => checkAllPublicChallenges()}
-          disabled={
-            loadingGroups ||
-            !selectedGroup ||
-            checkingAllPublic ||
-            Boolean(checkingPublic)
-          }
-        >
-          {checkingAllPublic ? (
-            <LoaderCircle size={15} />
-          ) : (
-            <CheckCircle2 size={15} />
-          )}
-          {checkingAllPublic ? "VÉRIFICATION..." : "ACTUALISER"}
-        </button>
-      </div>
-
-      {/* Liste des défis encore disponibles */}
-      <div className="challenges-section-heading">
-        <div>
-          <h2>TOUS LES DÉFIS</h2>
-          <p>Choisis tes prochaines missions.</p>
-        </div>
-
-        <span className="challenge-count">
-          {loadingPublicCompletions || checkingAllPublic
-            ? "CHARGEMENT..."
-            : `${filteredChallenges.length} MISSIONS`}
-        </span>
-      </div>
-
-      <div className="challenges-filters">
-        {filters.map((filter) => (
-          <button
-            key={filter}
-            className={activeFilter === filter ? "active" : ""}
-            onClick={() => setActiveFilter(filter)}
-          >
-            {filter}
-          </button>
-        ))}
-      </div>
-
-      <div className="challenges-grid">
-        {loadingChallenges ||
-        loadingSubmissions ||
-        loadingPublicCompletions ||
-        checkingAllPublic ? (
-          <div className="challenges-loading">
-            <LoaderCircle size={22} />
-            <p>Chargement des défis...</p>
-          </div>
-        ) : filteredChallenges.length === 0 ? (
-          <div className="challenges-loading">
-            <Target size={25} />
-            <p>
-              Aucun défi disponible dans cette catégorie. Bravo, tu as tout
-              accompli !
-            </p>
-          </div>
-        ) : (
-          filteredChallenges.map((challenge) => {
-            const Icon = challenge.icon;
-            const isCustom = Boolean(challenge.groupId);
-
-            const mySubmission = submissions.find(
-              (item) =>
-                item.challenge_id === challenge.id &&
-                item.user_id === userId
-            );
-
-            const pendingForOthers = submissions.filter(
-              (item) =>
-                item.challenge_id === challenge.id &&
-                item.status === "pending" &&
-                item.user_id !== userId
-            );
-
-            return (
-              <div className="challenge-card" key={challenge.id}>
-                <div className="challenge-card-top">
-                  <div className="challenge-icon">
-                    <Icon size={23} />
-                  </div>
-
-                  <div className="challenge-card-top-actions">
-                    <span
-                      className={`challenge-difficulty ${challenge.difficulty.toLowerCase()}`}
-                    >
-                      {challenge.difficulty}
-                    </span>
-
-                    {isCustom &&
-                      (challenge.createdBy === userId ||
-                        ["admin", "owner", "creator"].includes(
-                          String(
-                            groupRoles[challenge.groupId] || ""
-                          ).toLowerCase()
-                        )) && (
-                        <button
-                          type="button"
-                          className="challenge-delete-button"
-                          onClick={() => deleteChallenge(challenge)}
-                          disabled={deletingChallenge === challenge.id}
-                          title="Supprimer ce défi"
-                          aria-label={`Supprimer le défi ${challenge.title}`}
-                        >
-                          {deletingChallenge === challenge.id ? (
-                            <LoaderCircle size={16} />
-                          ) : (
-                            <Trash2 size={16} />
-                          )}
-                        </button>
-                      )}
-                  </div>
-                </div>
-
-                <div className="challenge-card-content">
-                  <span className="challenge-category">
-                    {challenge.category}
-                  </span>
-
-                  <h3>{challenge.title}</h3>
-                  <p>{challenge.description}</p>
-                </div>
-
-                <div className="challenge-card-footer">
-                  <div className="challenge-reward">
-                    <Zap size={17} />
-                    <strong>+{challenge.xp} XP</strong>
-                  </div>
-
-                  {!isCustom ? (
                     <button
-                      type="button"
-                      className="challenge-request-button"
-                      disabled={
-                        !selectedGroup ||
-                        checkingAllPublic ||
-                        checkingPublic === challenge.challengeKey
-                      }
-                      onClick={() =>
-                        checkPublicChallenge(challenge.challengeKey)
-                      }
+                      type="submit"
+                      className="challenge-submit-button"
+                      disabled={creating}
                     >
-                      {checkingPublic === challenge.challengeKey ? (
-                        <LoaderCircle size={15} />
-                      ) : !selectedGroup ? (
-                        <Lock size={15} />
+                      {creating ? (
+                        <LoaderCircle size={17} />
                       ) : (
-                        <CheckCircle2 size={15} />
+                        <Plus size={17} />
                       )}
-                      {!selectedGroup ? "REJOINS UN GROUPE" : "VÉRIFIER"}
-                    </button>
-                  ) : mySubmission?.status === "pending" ? (
-                    <span className="challenge-status-pending">
-                      <Clock size={15} />
-                      EN ATTENTE
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="challenge-request-button"
-                      disabled={
-                        Boolean(activeChallenge) ||
-                        Boolean(busySubmission)
-                      }
-                      onClick={() => openProofForm(challenge)}
-                    >
-                      <CheckCircle2 size={15} />
-                      {mySubmission?.status === "rejected"
-                        ? "RÉESSAYER"
-                        : "J'AI RÉUSSI"}
-                    </button>
-                  )}
-                </div>
 
-                {mySubmission?.status === "rejected" && (
-                  <div className="challenge-status-rejected">
-                    <XCircle size={14} />
-                    Ta dernière demande a été refusée.
-                  </div>
-                )}
+                      {creating ? "CRÉATION..." : "PUBLIER LE DÉFI"}
+                    </button>
 
-                {pendingForOthers.length > 0 && (
-                  <div className="challenge-pending-count">
-                    <Clock size={14} />
-                    {pendingForOthers.length} demande(s) à examiner
-                  </div>
+                    {message && (
+                      <p className="challenge-create-message">{message}</p>
+                    )}
+                  </form>
                 )}
               </div>
-            );
-          })
-        )}
-      </div>
 
-      {/* Formulaire de preuve */}
+              {/* DEMANDES À VALIDER */}
+              <div className="challenges-section-heading">
+                <div>
+                  <h2>DEMANDES À VALIDER</h2>
+                  <p>
+                    Examine les preuves envoyées par les autres membres
+                    de ce groupe.
+                  </p>
+                </div>
+
+                <span className="challenge-count">
+                  {pendingSubmissions.length} EN ATTENTE
+                </span>
+              </div>
+
+              <div className="challenge-submissions">
+                {loadingSubmissions ? (
+                  <div className="challenges-loading">
+                    <LoaderCircle size={22} />
+                    <p>Chargement des demandes...</p>
+                  </div>
+                ) : pendingSubmissions.length === 0 ? (
+                  <div className="challenges-loading">
+                    <Clock size={22} />
+                    <p>Aucune demande à valider pour le moment.</p>
+                  </div>
+                ) : (
+                  pendingSubmissions.map((submission) => {
+                    const challenge = selectedGroupChallenges.find(
+                      (item) => item.id === submission.challenge_id
+                    );
+
+                    if (!challenge) return null;
+
+                    return (
+                      <div
+                        className="challenge-submission-card"
+                        key={submission.id}
+                      >
+                        <div className="challenge-submission-info">
+                          <strong>{challenge.title}</strong>
+
+                          <span>
+                            Participation de{" "}
+                            <strong className="challenge-member-name">
+                              {memberNames[submission.user_id] || "Membre"}
+                            </strong>
+                          </span>
+
+                          {submission.proof_description && (
+                            <div className="challenge-proof-description">
+                              <FileText size={15} />
+                              <span>
+                                {submission.proof_description}
+                              </span>
+                            </div>
+                          )}
+
+                          {submission.photoUrl && (
+                            <img
+                              src={submission.photoUrl}
+                              alt="Preuve du défi"
+                              className="challenge-proof-image"
+                            />
+                          )}
+
+                          <span>
+                            Récompense potentielle :{" "}
+                            <strong>
+                              +{getSubmissionPoints(challenge, submission)} XP
+                            </strong>
+                          </span>
+                        </div>
+
+                        <div className="challenge-submission-actions">
+                          <button
+                            type="button"
+                            className="challenge-approve-button"
+                            disabled={busySubmission === submission.id}
+                            onClick={() =>
+                              reviewSubmission(submission.id, true)
+                            }
+                          >
+                            {busySubmission === submission.id ? (
+                              <LoaderCircle size={16} />
+                            ) : (
+                              <Check size={16} />
+                            )}
+                            Accepter
+                          </button>
+
+                          <button
+                            type="button"
+                            className="challenge-reject-button"
+                            disabled={busySubmission === submission.id}
+                            onClick={() =>
+                              reviewSubmission(submission.id, false)
+                            }
+                          >
+                            <XCircle size={16} />
+                            Refuser
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* LISTE DES DÉFIS PUBLICS */}
+              <div className="challenges-section-heading">
+                <div>
+                  <h2>DÉFIS PUBLICS</h2>
+                  <p>
+                    Participe aux défis proposés par les membres de ton groupe.
+                  </p>
+                </div>
+
+                <span className="challenge-count">
+                  {publicLoading
+                    ? "CHARGEMENT..."
+                    : `${availablePublicChallenges.length} DÉFIS`}
+                </span>
+              </div>
+
+              <div className="challenges-grid">
+                {publicLoading ? (
+                  <div className="challenges-loading">
+                    <LoaderCircle size={22} />
+                    <p>Chargement des défis publics...</p>
+                  </div>
+                ) : selectedGroupChallenges.length === 0 ? (
+                  <div className="challenges-loading">
+                    <Target size={25} />
+                    <p>
+                      Aucun défi public pour le moment. Sois le premier à en
+                      proposer un à ton groupe !
+                    </p>
+                  </div>
+                ) : availablePublicChallenges.length === 0 ? (
+                  <div className="challenges-loading">
+                    <Trophy size={25} />
+                    <p>
+                      Tu as participé à tous les défis publics disponibles
+                      de ce groupe. Retrouve tes réussites dans l'onglet
+                      Réussites.
+                    </p>
+                  </div>
+                ) : (
+                  availablePublicChallenges.map((challenge) => {
+                    const Icon = challenge.icon;
+
+                    const mySubmission = submissions.find(
+                      (item) =>
+                        item.challenge_id === challenge.id &&
+                        item.user_id === userId
+                    );
+
+                    const pendingForOthers = submissions.filter(
+                      (item) =>
+                        item.challenge_id === challenge.id &&
+                        item.status === "pending" &&
+                        item.user_id !== userId
+                    );
+
+                    const canDelete =
+                      challenge.createdBy === userId ||
+                      ["admin", "owner", "creator"].includes(
+                        String(
+                          groupRoles[challenge.groupId] || ""
+                        ).toLowerCase()
+                      );
+
+                    return (
+                      <div className="challenge-card" key={challenge.id}>
+                        <div className="challenge-card-top">
+                          <div className="challenge-icon">
+                            <Icon size={23} />
+                          </div>
+
+                          <div className="challenge-card-top-actions">
+                            <span className="challenge-difficulty public">
+                              PUBLIC
+                            </span>
+
+                            {canDelete && (
+                              <button
+                                type="button"
+                                className="challenge-delete-button"
+                                onClick={() => deleteChallenge(challenge)}
+                                disabled={
+                                  deletingChallenge === challenge.id
+                                }
+                                title="Supprimer ce défi"
+                                aria-label={`Supprimer le défi ${challenge.title}`}
+                              >
+                                {deletingChallenge === challenge.id ? (
+                                  <LoaderCircle size={16} />
+                                ) : (
+                                  <Trash2 size={16} />
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="challenge-card-content">
+                          <span className="challenge-category">
+                            DÉFI DE GROUPE
+                          </span>
+
+                          <h3>{challenge.title}</h3>
+                          <p>{challenge.description}</p>
+                        </div>
+
+                        <div className="challenge-card-footer">
+                          <div className="challenge-reward">
+                            <Zap size={17} />
+                            <strong>+{challenge.xp} XP</strong>
+                          </div>
+
+                          {mySubmission?.status === "pending" ? (
+                            <span className="challenge-status-pending">
+                              <Clock size={15} />
+                              EN ATTENTE
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="challenge-request-button"
+                              disabled={
+                                Boolean(activeChallenge) ||
+                                Boolean(busySubmission)
+                              }
+                              onClick={() => openProofForm(challenge)}
+                            >
+                              <CheckCircle2 size={15} />
+
+                              {mySubmission?.status === "rejected"
+                                ? "RÉESSAYER"
+                                : "J'AI RÉUSSI"}
+                            </button>
+                          )}
+                        </div>
+
+                        {mySubmission?.status === "rejected" && (
+                          <div className="challenge-status-rejected">
+                            <XCircle size={14} />
+                            Ta dernière participation a été refusée.
+                          </div>
+                        )}
+
+                        {pendingForOthers.length > 0 && (
+                          <div className="challenge-pending-count">
+                            <Clock size={14} />
+                            {pendingForOthers.length} demande(s) à examiner
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="challenges-info">
+                <Users size={19} />
+                <p>
+                  Les défis publics sont communs aux membres de leur groupe.
+                  Chaque membre peut participer individuellement en envoyant
+                  une preuve. Un autre membre peut ensuite valider ou refuser
+                  cette participation. Les récompenses sont attribuées au
+                  participant concerné.
+                </p>
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
+      {/* ================================================= */}
+      {/* MODALE DE PREUVE */}
+      {/* ================================================= */}
+
       {activeChallenge && (
         <div className="challenge-modal-overlay">
-          <form className="challenge-proof-modal" onSubmit={submitChallenge}>
+          <form
+            className="challenge-proof-modal"
+            onSubmit={submitChallenge}
+          >
             <button
               type="button"
               className="challenge-modal-close"
@@ -1353,7 +1680,7 @@ export default function Challenges({ userId }) {
 
             <div className="challenges-eyebrow">
               <CheckCircle2 size={15} />
-              <span>VALIDATION DU DÉFI</span>
+              <span>PARTICIPATION AU DÉFI</span>
             </div>
 
             <h2>{activeChallenge.title}</h2>
@@ -1385,11 +1712,16 @@ export default function Challenges({ userId }) {
               PHOTO DE PREUVE <span>(+50 XP)</span>
             </label>
 
-            <label className="challenge-photo-upload" htmlFor="proof-photo">
+            <label
+              className="challenge-photo-upload"
+              htmlFor="proof-photo"
+            >
               <ImagePlus size={22} />
+
               <span>
                 {proofFile ? proofFile.name : "Ajouter une photo"}
               </span>
+
               <small>JPG, PNG ou WebP · 5 Mo maximum</small>
             </label>
 
@@ -1404,6 +1736,7 @@ export default function Challenges({ userId }) {
             {proofPreview && (
               <div className="challenge-proof-preview">
                 <img src={proofPreview} alt="Aperçu de la preuve" />
+
                 <button
                   type="button"
                   onClick={() => {
@@ -1438,23 +1771,14 @@ export default function Challenges({ userId }) {
               ) : (
                 <CheckCircle2 size={17} />
               )}
-              {submittingProof ? "ENVOI..." : "ENVOYER MA DEMANDE"}
+
+              {submittingProof
+                ? "ENVOI..."
+                : "ENVOYER MA PARTICIPATION"}
             </button>
           </form>
         </div>
       )}
-
-      <div className="challenges-info">
-        <CheckCircle2 size={19} />
-        <p>
-          Les défis personnalisés peuvent être créés par tous les membres
-          de leur groupe. Leur validation par un autre membre permet
-          d'attribuer les XP. Une description et une photo de preuve
-          apportent des bonus. Les missions publiques sont vérifiées
-          automatiquement et leurs récompenses ne peuvent être obtenues
-          qu'une seule fois.
-        </p>
-      </div>
     </div>
   );
 }
